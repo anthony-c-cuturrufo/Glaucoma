@@ -4,6 +4,7 @@ from torch.utils.data import SubsetRandomSampler, DataLoader
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score
+from tqdm import tqdm
 
 from classification.dataloader import OCTDataset
 from classification.model import Custom3DCNN
@@ -46,7 +47,7 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Train the model
-    for epoch in range(num_epochs):
+    for epoch in tqdm(range(num_epochs)):
         # Training loop
         model.train()
         for batch in train_dataloader:
@@ -67,8 +68,9 @@ if __name__ == "__main__":
                 data = batch['data'].float()
                 targets = batch['target']
                 outputs = model(data)
-                val_loss += nn.CrossEntropyLoss()(outputs.float().squeeze(), targets.float().squeeze()).item()
-                val_acc += accuracy_score(targets, torch.argmax(outputs, dim=1))
+                val_loss += nn.BCELoss()(outputs.float().squeeze(), targets.float().squeeze()).item()
+                val_acc += accuracy_score(targets, torch.round(outputs))
+                print(targets, outputs, torch.round(outputs))
             val_loss /= len(val_dataloader)
             val_acc /= len(val_dataloader)
 

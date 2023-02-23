@@ -84,7 +84,7 @@ class OCTDataset(Dataset):
         self.transform = transform
         df = pd.read_csv(filename)
         
-        N = 100
+        N = 10
         
         negs = df[df.glaucoma == 0]
         pos = df[df.glaucoma == 1]
