@@ -45,7 +45,7 @@ def resize_volume(img):
     # Set the desired depth
     desired_depth = 64
     desired_width = 128
-    desired_height = 256
+    desired_height = 128
     # Get current depth
     current_depth = img.shape[-1]
     current_width = img.shape[0]

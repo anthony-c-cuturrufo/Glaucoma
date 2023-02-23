@@ -4,6 +4,7 @@ from torch.utils.data import SubsetRandomSampler, DataLoader
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score
+from torchvision import transforms
 from tqdm import tqdm
 
 from classification.dataloader import OCTDataset
@@ -11,7 +12,10 @@ from classification.model import Custom3DCNN
 
 if __name__ == "__main__":
     print("Creating Dataset")
-    dataset = OCTDataset("/Users/anthonycuturrufo/Desktop/1374_patients_path.csv", None)
+    transforms = torch.nn.Sequential(
+    transforms.RandomRotation(45),
+)
+    dataset = OCTDataset("/Users/anthonycuturrufo/Desktop/1374_patients_path.csv", transforms)
     print("Done With Dataset")
 
     #Create Dataloader
