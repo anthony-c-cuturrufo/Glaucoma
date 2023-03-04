@@ -34,7 +34,7 @@ if __name__ == "__main__":
     train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in train_patient_ids])
     val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in val_patient_ids])
 
-    batch_size = 2
+    batch_size = 4
     train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler)
     val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=val_sampler)
     print("Size of Training Set: ", len(train_dataloader))
@@ -43,12 +43,14 @@ if __name__ == "__main__":
     
     # Set the hyperparameters
     learning_rate = 0.001
-    num_epochs = 10
+    num_epochs = 150
     num_classes = 1
 
     # Initialize the model and the optimizer
     model = Custom3DCNN()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+    best_val = 0
 
     # Train the model
     for epoch in tqdm(range(num_epochs)):
@@ -74,9 +76,15 @@ if __name__ == "__main__":
                 outputs = model(data)
                 val_loss += nn.BCELoss()(outputs.float().squeeze(), targets.float().squeeze()).item()
                 val_acc += accuracy_score(targets, torch.round(outputs))
-                print(targets, outputs, torch.round(outputs))
             val_loss /= len(val_dataloader)
             val_acc /= len(val_dataloader)
 
+            if val_acc > best_val:
+                best_val = val_acc
+                print("Saving")
+                torch.save(model.state_dict(), "BIG_TEST.pth")
+
         # Print the epoch and validation metrics
         print(f"Epoch {epoch+1}/{num_epochs}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {loss:.4f}")
+
