@@ -43,7 +43,6 @@ from monai.transforms import (
 
 
 import numpy as np 
-import torch
 from torch.utils.data import SubsetRandomSampler, DataLoader
 import torch.nn as nn
 import torch.optim as optim
