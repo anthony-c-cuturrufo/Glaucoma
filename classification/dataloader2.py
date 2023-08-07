@@ -92,7 +92,7 @@ class OCTDataset(Dataset):
         self.transform = transform
         df = pd.read_csv(filename)
         
-        N = 960
+        N = 1600
         augment_data = True 
         
         negs = df[(df.classification == 0) & (df.filepaths != "-1")]
@@ -101,8 +101,8 @@ class OCTDataset(Dataset):
         normal_scans = [process_scan(adjust_filepath(f)) for f in tqdm(negs.filepaths.values[:N])]
         abnormal_scans = [process_scan(adjust_filepath(f)) for f in tqdm(pos.filepaths.values[:N])]
 
-        unique_pos_pids = list(set(pos.STUDY_ID.values[:N]))
-        unique_neg_pids = list(set(negs.STUDY_ID.values[:N]))
+        unique_pos_pids = list(set(pos.MRN.values[:N]))
+        unique_neg_pids = list(set(negs.MRN.values[:N]))
 
         np.random.shuffle(unique_pos_pids)
         np.random.shuffle(unique_neg_pids)
@@ -118,9 +118,9 @@ class OCTDataset(Dataset):
 
         if augment_data:
             # data augmentations 
-            new_scans = [transform(normal_scans[i]) for i in range(len(normal_scans)) if negs.STUDY_ID.values[i] in self.train_patient_ids] 
+            new_scans = [transform(normal_scans[i]) for i in range(len(normal_scans)) if negs.MRN.values[i] in self.train_patient_ids] 
             # new_scans += [transform(normal_scans[i]) for i in range(len(normal_scans)) if negs.STUDY_ID.values[i] in self.train_patient_ids]
-            new_scan_ids = np.array([negs.STUDY_ID.values[i] for i in range(len(normal_scans)) if negs.STUDY_ID.values[i] in self.train_patient_ids])
+            new_scan_ids = np.array([negs.MRN.values[i] for i in range(len(normal_scans)) if negs.MRN.values[i] in self.train_patient_ids])
 
             # add new scans
             normal_scans = np.array(normal_scans + new_scans)
@@ -138,9 +138,9 @@ class OCTDataset(Dataset):
         self.targets = np.concatenate((abnormal_labels, normal_labels), axis=0)
         
         if augment_data: 
-            self.patient_ids = np.concatenate((pos.STUDY_ID.values[:N], negs.STUDY_ID.values[:N], new_scan_ids))
+            self.patient_ids = np.concatenate((pos.MRN.values[:N], negs.MRN.values[:N], new_scan_ids))
         else: 
-            self.patient_ids = np.concatenate((pos.STUDY_ID.values[:N], negs.STUDY_ID.values[:N]))
+            self.patient_ids = np.concatenate((pos.MRN.values[:N], negs.MRN.values[:N]))
         
     def __len__(self):
         return len(self.targets)

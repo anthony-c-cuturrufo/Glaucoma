@@ -44,6 +44,7 @@ from monai.transforms import (
 
 
 import numpy as np 
+import torch
 from torch.utils.data import SubsetRandomSampler, DataLoader
 import torch.nn as nn
 import torch.optim as optim
@@ -53,15 +54,15 @@ from sklearn.metrics import accuracy_score
 # from torchvision import transforms
 from tqdm import tqdm
 
-from classification.dataloader2 import OCTDataset
-from classification.model import Custom3DCNN
+from classification.dataloader_contrastive import OCTDataset
+from classification.model_contrastive import ResNet, ContrastiveLoss
 
 if __name__ == "__main__":
     print("Creating Dataset")
     transforms = Compose([
         ToTensor(),
-        RandGaussianNoise(prob=0.1, mean=0.0, std=0.2), 
-        RandScaleIntensity(prob=1, factors=(-10,300)),
+        RandGaussianNoise(), 
+        RandScaleIntensity(prob=1, factors=(5,10)),
         RandAdjustContrast(),
         RandAffine(prob=1, translate_range=(30,10, 0), rotate_range=(0,.5,0), scale_range=(-.5,.5,0), padding_mode = "zeros"),
         ToNumpy(),
@@ -76,33 +77,30 @@ if __name__ == "__main__":
     train_patient_ids = dataset.train_patient_ids
 
     # Use SubsetRandomSampler to create subsets of the dataset
-    train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in train_patient_ids])
-    val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in val_patient_ids])
+    train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i][0]['patient_id'] in train_patient_ids])
+    val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i][0]['patient_id'] in val_patient_ids])
 
-    batch_size = 4
+    batch_size = 3
     train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler)
     val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=val_sampler)
     print("Size of Training Set: ", len(train_dataloader))
     print("Size of Validation Set: ", len(val_dataloader))
     #-------------------------------------------------
     #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = "cuda:1"
+    device = "cuda:2"
     print(device)
     # model = monai.networks.nets.densenet.densenet121(spatial_dims=3, in_channels=1, out_channels=1).to(device)
     # define the input image size and number of output classes
     # input_shape = (1, 64, 64, 64)
 
     # create the ResNet model
-    model = monai.networks.nets.SEResNext101(
-        spatial_dims=3,
-        in_channels=1,
-        num_classes=1,
-    ).to(device)
+    model = ResNet(spatial_dims=3, in_channels=1, num_classes=1024).to(device)
     # model.class_layers.add_module("sig", torch.nn.Sigmoid())
 
 
     # define the loss function and optimizer
     loss_function = torch.nn.BCEWithLogitsLoss()
+    contrastiveloss = ContrastiveLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
     # model.class_layers.add_module("sig", torch.nn.Sigmoid())
     # loss_function = torch.nn.BCELoss()
@@ -133,11 +131,17 @@ if __name__ == "__main__":
         step = 0
         for batch_data in train_dataloader:
             step += 1
-            inputs, labels = batch_data['data'].to(device), batch_data['target'].to(device)
+            inputs, aux, labels = batch_data[0]['data'].to(device), batch_data[0]['aux'].to(device), batch_data[0]['target'].to(device)
             inputs = inputs.float().unsqueeze(1)
+            aux = aux.float().unsqueeze(1)
+
             optimizer.zero_grad()
-            outputs = model(inputs)
+            embedding1,embedding2,outputs = model(inputs,aux)
+
             loss = loss_function(outputs.squeeze().float(), labels.squeeze().float())
+            contrastiveloss_value = contrastiveloss(embedding1,embedding2, labels.squeeze().float())
+            loss = loss + contrastiveloss_value
+
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -159,10 +163,12 @@ if __name__ == "__main__":
                 step = 0
                 for val_data in val_dataloader:
                     step += 1
-                    val_images, val_labels = val_data['data'].to(device), val_data['target'].cpu()
+                    val_images,val_aux, val_labels = val_data[0]['data'].to(device), val_data[0]['aux'].to(device), val_data[0]['target'].cpu()
                     val_images = val_images.float().unsqueeze(1)
-                    val_outputs = model(val_images).cpu().squeeze()
-                    
+                    val_aux = val_aux.float().unsqueeze(1)
+
+                    val_embedding1,val_embedding2, val_outputs = model(val_images,val_aux)
+                    val_outputs = val_outputs.cpu().squeeze()
                     # val_outputs = torch.sigmoid(val_outputs[:,1])
                     # print(val_outputs, val_outputs > .5)
                     # print(val_outputs, val_outputs > 0.5, val_labels)
