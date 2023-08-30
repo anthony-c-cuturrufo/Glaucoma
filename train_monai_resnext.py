@@ -1,37 +1,17 @@
-from tqdm import tqdm  
-import logging
 import os
-import sys
-import tempfile
-
-# import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
+import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 
 import monai
-from monai.networks.nets import AHNet
-from monai.networks.nets import ResNet
-
-from monai.apps import download_and_extract
-from monai.config import print_config
 import pandas as pd
 from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
 from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, recall_score, precision_score, confusion_matrix
-from monai.data import CacheDataset, DataLoader#, NiftiDataset, Dataset
 from monai.transforms import (
-    AddChannel,
-    AddChanneld,
-    Compose, 
-    RandRotate90, 
-    Resize,
-    Resized,
-    ScaleIntensity, 
+    Compose,  
     ToTensor,
-    Randomizable,
-    # LoadNifti
-    ToTensord,
-    MapTransform,
     RandGaussianNoise,
     RandScaleIntensity,
     RandAdjustContrast,
@@ -40,34 +20,23 @@ from monai.transforms import (
     ToNumpy
 
 )
-# from torchvision import transforms
 
-
-import numpy as np 
 from torch.utils.data import SubsetRandomSampler, DataLoader
-import torch.nn as nn
-import torch.optim as optim
 from sklearn.metrics import accuracy_score
-
-
-# from torchvision import transforms
-from tqdm import tqdm
-
-from classification.dataloader2 import OCTDataset
+from classification.dataloader import OCTDataset
 from classification.model import Custom3DCNN
 
 if __name__ == "__main__":
     print("Creating Dataset")
     transforms = Compose([
         ToTensor(),
-        RandGaussianNoise(prob=0.1, mean=0.0, std=0.2), 
-        RandScaleIntensity(prob=1, factors=(-10,300)),
+        RandGaussianNoise(), 
+        RandScaleIntensity(prob=1, factors=(5,10)),
         RandAdjustContrast(),
-        RandAffine(prob=1, translate_range=(30,10, 0), rotate_range=(0,.5,0), scale_range=(-.5,.5,0), padding_mode = "zeros"),
+        RandAffine(prob=1, translate_range=(15,10, 0), rotate_range=(0.02,0,0), scale_range=((-.1, .4), 0,0), padding_mode = "zeros"),
         ToNumpy(),
         ])
-    dataset = OCTDataset("local_database4.csv", transforms)
-    # dataset = torch.load("/local2/acc/Glaucoma/Custom_Dataset/custom_dataset2.pt")
+    dataset = OCTDataset("local_database7_Macular_SubMRN_v3.csv", transforms)
     print("Done With Dataset")
 
     #Create Dataloader
@@ -79,18 +48,15 @@ if __name__ == "__main__":
     train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in train_patient_ids])
     val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in val_patient_ids])
 
-    batch_size = 4
+    batch_size = 5
     train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler)
     val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=val_sampler)
     print("Size of Training Set: ", len(train_dataloader))
     print("Size of Validation Set: ", len(val_dataloader))
     #-------------------------------------------------
     #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = "cuda:1"
+    device = "cuda:3"
     print(device)
-    # model = monai.networks.nets.densenet.densenet121(spatial_dims=3, in_channels=1, out_channels=1).to(device)
-    # define the input image size and number of output classes
-    # input_shape = (1, 64, 64, 64)
 
     # create the ResNet model
     model = monai.networks.nets.SEResNext101(
@@ -98,16 +64,14 @@ if __name__ == "__main__":
         in_channels=1,
         num_classes=1,
     ).to(device)
-    # model.class_layers.add_module("sig", torch.nn.Sigmoid())
+
+
 
 
     # define the loss function and optimizer
     loss_function = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
-    # model.class_layers.add_module("sig", torch.nn.Sigmoid())
-    # loss_function = torch.nn.BCELoss()
-    # optimizer = torch.optim.Adam(model.parameters(), 1e-5)
-
+    
     best_metric = -1
     best_metric_epoch = -1
     epoch_loss_values = list()
@@ -123,7 +87,7 @@ if __name__ == "__main__":
 
     # start a typical PyTorch training
     start_epoch = 0
-    num_epochs = 400
+    num_epochs = 300
 
     for epoch in range(start_epoch, num_epochs):
         print("-" * 10)
@@ -134,10 +98,9 @@ if __name__ == "__main__":
         for batch_data in train_dataloader:
             step += 1
             inputs, labels = batch_data['data'].to(device), batch_data['target'].to(device)
-            inputs = inputs.float().unsqueeze(1)
             optimizer.zero_grad()
             outputs = model(inputs)
-            loss = loss_function(outputs.squeeze().float(), labels.squeeze().float())
+            loss = loss_function(outputs.squeeze(dim=1), labels)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -160,20 +123,14 @@ if __name__ == "__main__":
                 for val_data in val_dataloader:
                     step += 1
                     val_images, val_labels = val_data['data'].to(device), val_data['target'].cpu()
-                    val_images = val_images.float().unsqueeze(1)
-                    val_outputs = model(val_images).cpu().squeeze()
-                    
-                    # val_outputs = torch.sigmoid(val_outputs[:,1])
-                    # print(val_outputs, val_outputs > .5)
-                    # print(val_outputs, val_outputs > 0.5, val_labels)
-                    pred_probs.extend(val_outputs)
+                    val_outputs = model(val_images).cpu().squeeze(dim=1)
+                    pred_probs.extend(torch.sigmoid(val_outputs))
                     preds.extend(val_outputs > 0.5)
                     gts.extend(val_labels)
-                    # print(preds, gts)
                 acc = accuracy_score(gts, preds)
                 f1 = f1_score(gts, preds)
                 recall = recall_score(gts, preds)
-                prec = precision_score(gts, preds)
+                prec = precision_score(gts, preds, zero_division=1)
                 tn, fp, fn, tp = confusion_matrix(gts, preds, labels=[0, 1]).ravel()
 
                 try:

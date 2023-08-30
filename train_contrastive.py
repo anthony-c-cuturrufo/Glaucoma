@@ -40,8 +40,6 @@ from monai.transforms import (
     ToNumpy
 
 )
-# from torchvision import transforms
-
 
 import numpy as np 
 import torch
@@ -49,12 +47,9 @@ from torch.utils.data import SubsetRandomSampler, DataLoader
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score
-
-
-# from torchvision import transforms
 from tqdm import tqdm
-
-from classification.dataloader_contrastive import OCTDataset
+from classification.dataloader_MacularOptic_contrastive import OCTDataset
+# from classification.dataloader_contrastive import OCTDataset
 from classification.model_contrastive import ResNet, ContrastiveLoss
 
 if __name__ == "__main__":
@@ -64,10 +59,11 @@ if __name__ == "__main__":
         RandGaussianNoise(), 
         RandScaleIntensity(prob=1, factors=(5,10)),
         RandAdjustContrast(),
-        RandAffine(prob=1, translate_range=(30,10, 0), rotate_range=(0,.5,0), scale_range=(-.5,.5,0), padding_mode = "zeros"),
+        RandAffine(prob=1, translate_range=(15,10, 0), rotate_range=(0.02,0,0), scale_range=((-.1, .4), 0,0), padding_mode = "zeros"),
         ToNumpy(),
         ])
-    dataset = OCTDataset("local_database4.csv", transforms)
+    # dataset = OCTDataset("local_database6_Macular_SubMRN_v2.csv", transforms)
+    dataset = OCTDataset("local_database6_MacularOptic_SubMRN_v2.csv", transforms)
     # dataset = torch.load("/local2/acc/Glaucoma/Custom_Dataset/custom_dataset2.pt")
     print("Done With Dataset")
 
@@ -80,7 +76,7 @@ if __name__ == "__main__":
     train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i][0]['patient_id'] in train_patient_ids])
     val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i][0]['patient_id'] in val_patient_ids])
 
-    batch_size = 3
+    batch_size = 4
     train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler)
     val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=val_sampler)
     print("Size of Training Set: ", len(train_dataloader))
@@ -121,7 +117,7 @@ if __name__ == "__main__":
 
     # start a typical PyTorch training
     start_epoch = 0
-    num_epochs = 400
+    num_epochs = 200
 
     for epoch in range(start_epoch, num_epochs):
         print("-" * 10)
@@ -132,14 +128,14 @@ if __name__ == "__main__":
         for batch_data in train_dataloader:
             step += 1
             inputs, aux, labels = batch_data[0]['data'].to(device), batch_data[0]['aux'].to(device), batch_data[0]['target'].to(device)
-            inputs = inputs.float().unsqueeze(1)
-            aux = aux.float().unsqueeze(1)
-
+            # inputs = inputs.float().unsqueeze(1)
+            # aux = aux.float().unsqueeze(1)
+            # print(inputs.shape, aux.shape)
             optimizer.zero_grad()
             embedding1,embedding2,outputs = model(inputs,aux)
 
-            loss = loss_function(outputs.squeeze().float(), labels.squeeze().float())
-            contrastiveloss_value = contrastiveloss(embedding1,embedding2, labels.squeeze().float())
+            loss = loss_function(outputs.squeeze(dim=1), labels)
+            contrastiveloss_value = contrastiveloss(embedding1,embedding2, labels)
             loss = loss + contrastiveloss_value
 
             loss.backward()
@@ -164,22 +160,22 @@ if __name__ == "__main__":
                 for val_data in val_dataloader:
                     step += 1
                     val_images,val_aux, val_labels = val_data[0]['data'].to(device), val_data[0]['aux'].to(device), val_data[0]['target'].cpu()
-                    val_images = val_images.float().unsqueeze(1)
-                    val_aux = val_aux.float().unsqueeze(1)
+                    # val_images = val_images.float().unsqueeze(1)
+                    # val_aux = val_aux.float().unsqueeze(1)
 
                     val_embedding1,val_embedding2, val_outputs = model(val_images,val_aux)
-                    val_outputs = val_outputs.cpu().squeeze()
+                    val_outputs = val_outputs.cpu().squeeze(dim=1)
                     # val_outputs = torch.sigmoid(val_outputs[:,1])
                     # print(val_outputs, val_outputs > .5)
                     # print(val_outputs, val_outputs > 0.5, val_labels)
-                    pred_probs.extend(val_outputs)
+                    pred_probs.extend(torch.sigmoid(val_outputs))
                     preds.extend(val_outputs > 0.5)
                     gts.extend(val_labels)
                     # print(preds, gts)
                 acc = accuracy_score(gts, preds)
                 f1 = f1_score(gts, preds)
                 recall = recall_score(gts, preds)
-                prec = precision_score(gts, preds)
+                prec = precision_score(gts, preds, zero_division=1)
                 tn, fp, fn, tp = confusion_matrix(gts, preds, labels=[0, 1]).ravel()
 
                 try:
