@@ -35,30 +35,23 @@ class OCTDataset(Dataset):
         self.train_patient_ids = np.concatenate((unique_pos_pids[num_pos_val_patients:], unique_neg_pids[num_neg_val_patients:]))
 
         if augment_data:
-            # data augmentations 
+            # data augmentations - normals 
             new_scans = [transform(normal_scans[i]) for i in range(len(normal_scans)) if negs.MRN.values[i] in self.train_patient_ids] 
             new_scan_ids = np.array([negs.MRN.values[i] for i in range(len(normal_scans)) if negs.MRN.values[i] in self.train_patient_ids])
-
-            # add new scans
             normal_scans = np.array(normal_scans + new_scans)
 
-            # data augmentations 
+            # data augmentations - abnormals
             pos_new_scans = [transform(abnormal_scans[i]) for i in range(len(abnormal_scans)) if pos.MRN.values[i] in self.train_patient_ids][:N] 
             pos_new_scan_ids = np.array([pos.MRN.values[i] for i in range(len(abnormal_scans)) if pos.MRN.values[i] in self.train_patient_ids])[:N]
-
-            # add new scans
             abnormal_scans = np.array(abnormal_scans + pos_new_scans)
-
 
         else:
             normal_scans = np.array(normal_scans)
-
-
-        abnormal_scans = np.array(abnormal_scans) 
+            abnormal_scans = np.array(abnormal_scans) 
 
         #create labels        
-        normal_labels = np.array([0 for _ in range(len(normal_scans))], dtype=np.float32)
-        abnormal_labels = np.array([1 for _ in range(len(abnormal_scans))], dtype=np.float32)
+        normal_labels = np.tile([1, 0], (len(normal_scans), 1)).astype(np.float32)
+        abnormal_labels = np.tile([0, 1], (len(abnormal_scans), 1)).astype(np.float32)
         
         self.data = np.concatenate((abnormal_scans, normal_scans), axis=0)
         self.targets = np.concatenate((abnormal_labels, normal_labels), axis=0)

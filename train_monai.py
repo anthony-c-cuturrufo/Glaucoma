@@ -1,84 +1,74 @@
-from tqdm import tqdm  
-import logging
 import os
-import sys
-import tempfile
-
-import matplotlib.pyplot as plt
 import torch
+import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
-
 import monai
-from monai.apps import download_and_extract
-from monai.config import print_config
-import pandas as pd
-from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
 from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, recall_score, precision_score, confusion_matrix
-from monai.data import CacheDataset, DataLoader#, NiftiDataset, Dataset
 from monai.transforms import (
-    AddChannel,
-    AddChanneld,
-    Compose, 
-    RandRotate90, 
-    Resize,
-    Resized,
-    ScaleIntensity, 
+    Compose,  
     ToTensor,
-    Randomizable,
-    # LoadNiftid,
-    ToTensord,
-    MapTransform,
+    RandGaussianNoise,
+    RandScaleIntensity,
+    RandAdjustContrast,
+    RandAffine,
+    ToTensor,
+    ToNumpy
+
 )
-
-import numpy as np 
-import torch
 from torch.utils.data import SubsetRandomSampler, DataLoader
-import torch.nn as nn
-import torch.optim as optim
-from sklearn.metrics import accuracy_score
-from torchvision import transforms
-from tqdm import tqdm
-
 from classification.dataloader import OCTDataset
-from classification.model import Custom3DCNN
+from classification.model_factory import model_factory
+import argparse
+
+
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Train a model on OCTDataset')
+    parser.add_argument('--model_name', type=str, default="ResNext50", help='Name of the model to use (e.g., ResNext50, ViT, etc.)')
+    parser.add_argument('--cuda', type=str, default="cuda:2", help='CUDA device to use (e.g., cuda:0, cuda:1, etc.)')
+    parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training and validation')
+
+    args = parser.parse_args()
+
+    device = args.cuda
+    model_name = args.model_name
+    batch_size = args.batch_size
+
+    # Create Dataset
+    #-------------------------------------------------
     print("Creating Dataset")
-    transforms = torch.nn.Sequential(
-    transforms.RandomRotation(45),
-    )
-    dataset = OCTDataset("/Users/anthonycuturrufo/Desktop/1374_patients_path.csv", transforms)
+    transforms = Compose([
+        ToTensor(),
+        RandGaussianNoise(), 
+        RandScaleIntensity(prob=1, factors=(5,10)),
+        RandAdjustContrast(),
+        RandAffine(prob=1, translate_range=(15,10, 0), rotate_range=(0.02,0,0), scale_range=((-.1, .4), 0,0), padding_mode = "zeros"),
+        ToNumpy(),
+        ])
+    dataset = OCTDataset("local_database7_Macular_SubMRN_v3.csv", transforms)
     print("Done With Dataset")
 
     #Create Dataloader
     #-------------------------------------------------
-    # Shuffle list of unique patient IDs in the dataset
-    unique_patient_ids = list(set(dataset.patient_ids))
-    np.random.shuffle(unique_patient_ids)
-
-    # Split the list of patient IDs into training and validation sets
-    val_split = 0.2
-    num_val_patients = int(np.ceil(val_split * len(unique_patient_ids)))
-    val_patient_ids = unique_patient_ids[:num_val_patients]
-    train_patient_ids = unique_patient_ids[num_val_patients:]
+    val_patient_ids = dataset.val_patient_ids
+    train_patient_ids = dataset.train_patient_ids
 
     # Use SubsetRandomSampler to create subsets of the dataset
     train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in train_patient_ids])
     val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in val_patient_ids])
 
-    batch_size = 1
     train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler)
     val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=val_sampler)
     print("Size of Training Set: ", len(train_dataloader))
     print("Size of Validation Set: ", len(val_dataloader))
-    #-------------------------------------------------
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = monai.networks.nets.densenet.densenet121(spatial_dims=3, in_channels=1, out_channels=1).to(device)
-    model.class_layers.add_module("sig", torch.nn.Sigmoid())
-    loss_function = torch.nn.BCELoss()
-    optimizer = torch.optim.Adam(model.parameters(), 1e-5)
+    #-------------------------------------------------    
+    model = model_factory(model_name).to(device)
 
+    # define the loss function and optimizer
+    loss_function = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+    
     best_metric = -1
     best_metric_epoch = -1
     epoch_loss_values = list()
@@ -86,7 +76,7 @@ if __name__ == "__main__":
     writer = SummaryWriter()
     val_interval = 1
     save_epoch = 1
-    save_dir = "exp1"
+    save_dir = "exp2"
 
     # save_dir = os.path.join(root_dir, save_dir)
     if not os.path.exists(save_dir):
@@ -94,7 +84,7 @@ if __name__ == "__main__":
 
     # start a typical PyTorch training
     start_epoch = 0
-    num_epochs = 20
+    num_epochs = 300
 
     for epoch in range(start_epoch, num_epochs):
         print("-" * 10)
@@ -105,11 +95,9 @@ if __name__ == "__main__":
         for batch_data in train_dataloader:
             step += 1
             inputs, labels = batch_data['data'].to(device), batch_data['target'].to(device)
-            inputs = inputs.float().unsqueeze(0)
             optimizer.zero_grad()
-            outputs = model(inputs)
-            # print(outputs, labels)
-            loss = loss_function(outputs.squeeze().float(), labels.squeeze().float())
+            outputs = model(inputs)[0] if model_name == "ViT" else model(inputs)
+            loss = loss_function(outputs, labels)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -132,24 +120,27 @@ if __name__ == "__main__":
                 for val_data in val_dataloader:
                     step += 1
                     val_images, val_labels = val_data['data'].to(device), val_data['target'].cpu()
-                    val_images = val_images.float().unsqueeze(0)
-                    val_outputs = model(val_images).cpu().squeeze()
-                    # print(val_labels)
-                    # print(val_outputs)
-                    # val_outputs = torch.sigmoid(val_outputs[:,1])
-                    # print(val_outputs, val_outputs > .5)
-                    print(val_outputs, val_outputs > 0.5, val_labels)
-                    pred_probs.extend([val_outputs])
-                    preds.extend([val_outputs > 0.5])
-                    gts.extend(val_labels)
+                    val_outputs = model(val_images)[0] if model_name == "ViT" else model(val_images)
+                    val_outputs = val_outputs.cpu()
+                    pred_probs.extend(F.softmax(val_outputs, dim=1).max(dim=1).values)
+                    preds.extend(val_outputs.argmax(dim=1))
+                    gts.extend(val_labels.argmax(dim=1))
                 acc = accuracy_score(gts, preds)
                 f1 = f1_score(gts, preds)
                 recall = recall_score(gts, preds)
-                prec = precision_score(gts, preds)
-                tn, fp, fn, tp = confusion_matrix(gts, preds).ravel()
-                spec = float(tn)/(float(tn) + float(fp))
+                prec = precision_score(gts, preds, zero_division=1)
+                tn, fp, fn, tp = confusion_matrix(gts, preds, labels=[0, 1]).ravel()
 
-                auc = roc_auc_score(gts, pred_probs)
+                try:
+                    spec = float(tn)/(float(tn) + float(fp))
+                except:
+                    spec = 0
+                
+                try: 
+                    auc = roc_auc_score(gts, pred_probs, labels=[0,1])
+                except:
+                    auc = 0
+                    print("Unknown AUC")
                 val_metric = auc
                 
                 if val_metric > best_metric:
