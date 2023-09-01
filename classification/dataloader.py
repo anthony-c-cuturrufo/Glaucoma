@@ -6,12 +6,11 @@ from tqdm import tqdm
 from classification.dataloader_utils import *
 
 class OCTDataset(Dataset):
-    def __init__(self, filename, transform):
+    def __init__(self, filename, transform, augment_data = True, contrastive_mode = "None"):
         self.transform = transform
+        self.contrastive_mode = contrastive_mode
         df = pd.read_csv(filename)
-        
         N = 238
-        augment_data = True 
         
         negs = df[(df.classification == 0) & (df.filepaths != "-1")]
         pos = df[(df.classification == 1) & (df.filepaths != "-1")]
@@ -65,14 +64,34 @@ class OCTDataset(Dataset):
         return len(self.targets)
     
     def __getitem__(self, index):
-        data = torch.tensor(self.data[index])
-        # if self.transform:
-        #     data = self.transform(data)
-        data_point = {
-            "data": data,
-            "target": torch.tensor(self.targets[index]),
-            "patient_id": self.patient_ids[index]
-        }
-        return data_point 
+        if self.contrastive_mode == "None":
+            data = torch.tensor(self.data[index])
+            # if self.transform:
+            #     data = self.transform(data)
+            data_point = {
+                "data": data,
+                "target": torch.tensor(self.targets[index]),
+                "patient_id": self.patient_ids[index]
+            }
+            return data_point 
+        else:
+            data = torch.tensor(self.data[index])
+            aux = torch.tensor(self.data[index])
+            if self.transform:
+                data = self.transform(data)
+                aux = self.transform(aux)
+            data_point = {
+                "data": data,
+                "aux" : aux,
+                "target": torch.tensor(self.targets[index]),
+                "patient_id": self.patient_ids[index]
+            }
+            aux_point = {
+                "data": aux,
+                "target": torch.tensor(self.targets[index]),
+                "patient_id": self.patient_ids[index]
+            }
+
+            return data_point,aux_point
     
     

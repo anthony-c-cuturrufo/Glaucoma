@@ -18,7 +18,7 @@ from monai.transforms import (
 )
 from torch.utils.data import SubsetRandomSampler, DataLoader
 from classification.dataloader import OCTDataset
-from classification.model_factory import model_factory
+from classification.model_factory import model_factory, ContrastiveLoss
 import argparse
 
 
@@ -28,12 +28,17 @@ if __name__ == "__main__":
     parser.add_argument('--model_name', type=str, default="ResNext50", help='Name of the model to use (e.g., ResNext50, ViT, etc.)')
     parser.add_argument('--cuda', type=str, default="cuda:2", help='CUDA device to use (e.g., cuda:0, cuda:1, etc.)')
     parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training and validation')
-
+    parser.add_argument('--dropout', type=float, default=.2, help='Dropout rate for model')
+    parser.add_argument('--contrastive_mode', type=str, default="None", help='Contrastive learning mode')
+    parser.add_argument('--augment', type=bool, default=True, help='Apply data augmentation')
     args = parser.parse_args()
 
     device = args.cuda
     model_name = args.model_name
     batch_size = args.batch_size
+    dropout = args.dropout
+    contrastive_mode = args.contrastive_mode
+    augment_data = args.augment
 
     # Create Dataset
     #-------------------------------------------------
@@ -46,7 +51,11 @@ if __name__ == "__main__":
         RandAffine(prob=1, translate_range=(15,10, 0), rotate_range=(0.02,0,0), scale_range=((-.1, .4), 0,0), padding_mode = "zeros"),
         ToNumpy(),
         ])
-    dataset = OCTDataset("local_database7_Macular_SubMRN_v3.csv", transforms)
+    dataset = OCTDataset(
+        "local_database7_Macular_SubMRN_v3.csv", 
+        transforms, 
+        augment_data = augment_data, 
+        contrastive_mode = contrastive_mode)
     print("Done With Dataset")
 
     #Create Dataloader
@@ -55,18 +64,23 @@ if __name__ == "__main__":
     train_patient_ids = dataset.train_patient_ids
 
     # Use SubsetRandomSampler to create subsets of the dataset
-    train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in train_patient_ids])
-    val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in val_patient_ids])
+    if contrastive_mode == "None":
+        train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in train_patient_ids])
+        val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in val_patient_ids])
+    else:
+        train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i][0]['patient_id'] in train_patient_ids])
+        val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i][0]['patient_id'] in val_patient_ids])
 
     train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler)
     val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=val_sampler)
     print("Size of Training Set: ", len(train_dataloader))
     print("Size of Validation Set: ", len(val_dataloader))
     #-------------------------------------------------    
-    model = model_factory(model_name).to(device)
+    model = model_factory(model_name, dropout, contrastive_mode=contrastive_mode).to(device)
 
     # define the loss function and optimizer
     loss_function = torch.nn.CrossEntropyLoss()
+    contrastiveloss = ContrastiveLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
     
     best_metric = -1
@@ -94,19 +108,28 @@ if __name__ == "__main__":
         step = 0
         for batch_data in train_dataloader:
             step += 1
-            inputs, labels = batch_data['data'].to(device), batch_data['target'].to(device)
             optimizer.zero_grad()
-            outputs = model(inputs)[0] if model_name == "ViT" else model(inputs)
+            if contrastive_mode == "None":
+                inputs, labels = batch_data['data'].to(device), batch_data['target'].to(device)
+                outputs = model(inputs)
+
+            else:
+                inputs, aux, labels = batch_data[0]['data'].to(device), batch_data[0]['aux'].to(device), batch_data[0]['target'].to(device)
+                embedding1,embedding2,outputs = model(inputs,aux)
+                contrastiveloss_value = contrastiveloss(embedding1,embedding2, labels)
+
             loss = loss_function(outputs, labels)
+            loss = loss + contrastiveloss_value if contrastive_mode != "None" else loss
+
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
             epoch_len = len(dataset) // batch_size
-            print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
+            print(f"{step}/{epoch_len}, train_loss: {loss.item():.6f}")
             writer.add_scalar("train_loss", loss.item(), epoch_len * epoch + step)
         epoch_loss /= step
         epoch_loss_values.append(epoch_loss)
-        print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
+        print(f"epoch {epoch + 1} average loss: {epoch_loss:.6f}")
 
         if (epoch + 1) % val_interval == 0:
             model.eval()
@@ -119,8 +142,14 @@ if __name__ == "__main__":
                 step = 0
                 for val_data in val_dataloader:
                     step += 1
-                    val_images, val_labels = val_data['data'].to(device), val_data['target'].cpu()
-                    val_outputs = model(val_images)[0] if model_name == "ViT" else model(val_images)
+
+                    if contrastive_mode == "None":
+                        val_images, val_labels = val_data['data'].to(device), val_data['target'].cpu()
+                        val_outputs = model(val_images)
+                    else:
+                        val_images,val_aux, val_labels = val_data[0]['data'].to(device), val_data[0]['aux'].to(device), val_data[0]['target'].cpu()
+                        val_embedding1,val_embedding2, val_outputs = model(val_images,val_aux)
+
                     val_outputs = val_outputs.cpu()
                     pred_probs.extend(F.softmax(val_outputs, dim=1).max(dim=1).values)
                     preds.extend(val_outputs.argmax(dim=1))
