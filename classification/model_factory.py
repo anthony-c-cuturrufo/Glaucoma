@@ -59,11 +59,12 @@ def model_factory(model_name, dropout=.2, num_classes=2, contrastive_mode = "Non
             in_channels=1,
             num_classes=n_classes,
             dropout_prob=dropout)
-    elif model_name == "RexNext121":
+    elif model_name == "ResNext121":
         model = monai.networks.nets.SEResNext101(
             spatial_dims=3,
             in_channels=1,
-            num_classes=n_classes)
+            num_classes=n_classes,
+            dropout_prob=dropout)
     else:
         raise ValueError(f"The model name {model_name} is not accepted.")
     
