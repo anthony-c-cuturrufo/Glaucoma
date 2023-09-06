@@ -1,8 +1,7 @@
-# Ignore CSV files
 *.csv
 
-# Ignore __pycache__ directories
 __pycache__/
 
-# Ignore .pth files
 *.pth
+
+*.log
