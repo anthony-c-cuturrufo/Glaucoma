@@ -29,7 +29,7 @@ To run the training script and start training your model, follow the instruction
 4. Run the main training script:
 
    ```
-   python train_monai.py --model_name ResNext50 --cuda cuda:2 --batch_size 4 --dropout 0.2 --contrastive_mode None --augment True
+   python train.py --model_name ResNext50 --cuda cuda:2 --batch_size 4 --dropout 0.2 --contrastive_mode None --augment True
    ```
 
 ## Script Arguments
