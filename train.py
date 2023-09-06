@@ -1,37 +1,13 @@
-from tqdm import tqdm  
-import logging
 import os
-import sys
-import tempfile
-
-# import matplotlib.pyplot as plt
 import torch
+import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
-
 import monai
-from monai.networks.nets import AHNet
-from monai.networks.nets import ResNet
-
-from monai.apps import download_and_extract
-from monai.config import print_config
-import pandas as pd
-from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
 from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, recall_score, precision_score, confusion_matrix
-from monai.data import CacheDataset, DataLoader#, NiftiDataset, Dataset
 from monai.transforms import (
-    AddChannel,
-    AddChanneld,
-    Compose, 
-    RandRotate90, 
-    Resize,
-    Resized,
-    ScaleIntensity, 
+    Compose,  
     ToTensor,
-    Randomizable,
-    # LoadNifti
-    ToTensord,
-    MapTransform,
     RandGaussianNoise,
     RandScaleIntensity,
     RandAdjustContrast,
@@ -40,19 +16,34 @@ from monai.transforms import (
     ToNumpy
 
 )
-
-import numpy as np 
-import torch
 from torch.utils.data import SubsetRandomSampler, DataLoader
-import torch.nn as nn
-import torch.optim as optim
-from sklearn.metrics import accuracy_score
-from tqdm import tqdm
-from classification.dataloader_MacularOptic_contrastive import OCTDataset
-# from classification.dataloader_contrastive import OCTDataset
-from classification.model_contrastive import ResNet, ContrastiveLoss
+from classification.dataloader import OCTDataset, OCTDataset_MacOp
+from classification.model_factory import model_factory, ContrastiveLoss
+import argparse
+
+
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Train a model on OCTDataset')
+    parser.add_argument('--model_name', type=str, default="ResNext50", help='Name of the model to use (e.g., ResNext50, ViT, etc.)')
+    parser.add_argument('--cuda', type=str, default="cuda:2", help='CUDA device to use (e.g., cuda:0, cuda:1, etc.)')
+    parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training and validation')
+    parser.add_argument('--dropout', type=float, default=.2, help='Dropout rate for model')
+    parser.add_argument('--contrastive_mode', type=str, default="None", help='Contrastive learning mode (e.g. augmentation or MacOp')
+    parser.add_argument('--augment', type=bool, default=True, help='Apply data augmentation')
+    parser.add_argument('--dataset', type=str, default="local_database8_Macular_SubMRN_v4.csv", help='Dataset filename')
+    args = parser.parse_args()
+
+    device = args.cuda
+    model_name = args.model_name
+    batch_size = args.batch_size
+    dropout = args.dropout
+    contrastive_mode = args.contrastive_mode
+    augment_data = args.augment
+    dataset_name = args.dataset
+
+    # Create Dataset
+    #-------------------------------------------------
     print("Creating Dataset")
     transforms = Compose([
         ToTensor(),
@@ -62,9 +53,18 @@ if __name__ == "__main__":
         RandAffine(prob=1, translate_range=(15,10, 0), rotate_range=(0.02,0,0), scale_range=((-.1, .4), 0,0), padding_mode = "zeros"),
         ToNumpy(),
         ])
-    # dataset = OCTDataset("local_database6_Macular_SubMRN_v2.csv", transforms)
-    dataset = OCTDataset("local_database6_MacularOptic_SubMRN_v2.csv", transforms)
-    # dataset = torch.load("/local2/acc/Glaucoma/Custom_Dataset/custom_dataset2.pt")
+    if contrastive_mode == "MacOp":
+        dataset = OCTDataset_MacOp(
+            dataset_name, 
+            transforms, 
+            augment_data = False) # TODO allow for data augmentation in MacOp
+
+    else:
+        dataset = OCTDataset(
+            dataset_name, 
+            transforms, 
+            augment_data = augment_data, 
+            contrastive_mode = contrastive_mode)
     print("Done With Dataset")
 
     #Create Dataloader
@@ -73,35 +73,25 @@ if __name__ == "__main__":
     train_patient_ids = dataset.train_patient_ids
 
     # Use SubsetRandomSampler to create subsets of the dataset
-    train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i][0]['patient_id'] in train_patient_ids])
-    val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i][0]['patient_id'] in val_patient_ids])
+    if contrastive_mode == "None":
+        train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in train_patient_ids])
+        val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i]['patient_id'] in val_patient_ids])
+    else:
+        train_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i][0]['patient_id'] in train_patient_ids])
+        val_sampler = SubsetRandomSampler([i for i in range(len(dataset)) if dataset[i][0]['patient_id'] in val_patient_ids])
 
-    batch_size = 4
     train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler)
     val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=val_sampler)
     print("Size of Training Set: ", len(train_dataloader))
     print("Size of Validation Set: ", len(val_dataloader))
-    #-------------------------------------------------
-    #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = "cuda:2"
-    print(device)
-    # model = monai.networks.nets.densenet.densenet121(spatial_dims=3, in_channels=1, out_channels=1).to(device)
-    # define the input image size and number of output classes
-    # input_shape = (1, 64, 64, 64)
-
-    # create the ResNet model
-    model = ResNet(spatial_dims=3, in_channels=1, num_classes=1024).to(device)
-    # model.class_layers.add_module("sig", torch.nn.Sigmoid())
-
+    #-------------------------------------------------    
+    model = model_factory(model_name, dropout, contrastive_mode=contrastive_mode).to(device)
 
     # define the loss function and optimizer
-    loss_function = torch.nn.BCEWithLogitsLoss()
+    loss_function = torch.nn.CrossEntropyLoss()
     contrastiveloss = ContrastiveLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
-    # model.class_layers.add_module("sig", torch.nn.Sigmoid())
-    # loss_function = torch.nn.BCELoss()
-    # optimizer = torch.optim.Adam(model.parameters(), 1e-5)
-
+    
     best_metric = -1
     best_metric_epoch = -1
     epoch_loss_values = list()
@@ -117,7 +107,7 @@ if __name__ == "__main__":
 
     # start a typical PyTorch training
     start_epoch = 0
-    num_epochs = 200
+    num_epochs = 300
 
     for epoch in range(start_epoch, num_epochs):
         print("-" * 10)
@@ -127,26 +117,29 @@ if __name__ == "__main__":
         step = 0
         for batch_data in train_dataloader:
             step += 1
-            inputs, aux, labels = batch_data[0]['data'].to(device), batch_data[0]['aux'].to(device), batch_data[0]['target'].to(device)
-            # inputs = inputs.float().unsqueeze(1)
-            # aux = aux.float().unsqueeze(1)
-            # print(inputs.shape, aux.shape)
             optimizer.zero_grad()
-            embedding1,embedding2,outputs = model(inputs,aux)
+            if contrastive_mode == "None":
+                inputs, labels = batch_data['data'].to(device), batch_data['target'].to(device)
+                outputs = model(inputs)
+                contrastiveloss_value = 0
 
-            loss = loss_function(outputs.squeeze(dim=1), labels)
-            contrastiveloss_value = contrastiveloss(embedding1,embedding2, labels)
-            loss = loss + contrastiveloss_value
+            else:
+                inputs, aux, labels = batch_data[0]['data'].to(device), batch_data[0]['aux'].to(device), batch_data[0]['target'].to(device)
+                embedding1,embedding2,outputs = model(inputs,aux)
+                contrastiveloss_value = contrastiveloss(embedding1,embedding2, labels)
+
+            loss = loss_function(outputs, labels)
+            loss = loss + contrastiveloss_value if contrastive_mode != "None" else loss
 
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
             epoch_len = len(dataset) // batch_size
-            print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
+            print(f"{step}/{epoch_len}, train_loss: {loss.item():.6f}")
             writer.add_scalar("train_loss", loss.item(), epoch_len * epoch + step)
         epoch_loss /= step
         epoch_loss_values.append(epoch_loss)
-        print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
+        print(f"epoch {epoch + 1} average loss: {epoch_loss:.6f}")
 
         if (epoch + 1) % val_interval == 0:
             model.eval()
@@ -159,19 +152,19 @@ if __name__ == "__main__":
                 step = 0
                 for val_data in val_dataloader:
                     step += 1
-                    val_images,val_aux, val_labels = val_data[0]['data'].to(device), val_data[0]['aux'].to(device), val_data[0]['target'].cpu()
-                    # val_images = val_images.float().unsqueeze(1)
-                    # val_aux = val_aux.float().unsqueeze(1)
 
-                    val_embedding1,val_embedding2, val_outputs = model(val_images,val_aux)
-                    val_outputs = val_outputs.cpu().squeeze(dim=1)
-                    # val_outputs = torch.sigmoid(val_outputs[:,1])
-                    # print(val_outputs, val_outputs > .5)
-                    # print(val_outputs, val_outputs > 0.5, val_labels)
-                    pred_probs.extend(torch.sigmoid(val_outputs))
-                    preds.extend(val_outputs > 0.5)
-                    gts.extend(val_labels)
-                    # print(preds, gts)
+                    if contrastive_mode == "None":
+                        val_images, val_labels = val_data['data'].to(device), val_data['target'].cpu()
+                        val_outputs = model(val_images)
+                    else:
+                        val_images,val_aux, val_labels = val_data[0]['data'].to(device), val_data[0]['aux'].to(device), val_data[0]['target'].cpu()
+                        val_embedding1,val_embedding2, val_outputs = model(val_images,val_aux)
+
+                    val_outputs = val_outputs.cpu()
+                    # pred_probs.extend(F.softmax(val_outputs, dim=1).max(dim=1).values)
+                    pred_probs.extend(F.softmax(val_outputs, dim=1)[:, 1].tolist())
+                    preds.extend(val_outputs.argmax(dim=1))
+                    gts.extend(val_labels.argmax(dim=1))
                 acc = accuracy_score(gts, preds)
                 f1 = f1_score(gts, preds)
                 recall = recall_score(gts, preds)
@@ -187,6 +180,7 @@ if __name__ == "__main__":
                     auc = roc_auc_score(gts, pred_probs, labels=[0,1])
                 except:
                     auc = 0
+                    print("Unknown AUC")
                 val_metric = auc
                 
                 if val_metric > best_metric:

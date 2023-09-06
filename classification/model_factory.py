@@ -69,8 +69,7 @@ def model_factory(model_name, dropout=.2, num_classes=2, contrastive_mode = "Non
         raise ValueError(f"The model name {model_name} is not accepted.")
     
 
-    if contrastive_mode == "augmentation":
-        print("FLAG 1")
+    if contrastive_mode in ["augmentation", "MacOp"]:
         return ContrastiveWrapper(model, contrastive_layer_size, num_classes)
     else:
         return model 
