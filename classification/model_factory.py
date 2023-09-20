@@ -3,6 +3,24 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class Efficient3DCNN(nn.Module):
+    def __init__(self, in_channels, num_classes):
+        super(Efficient3DCNN, self).__init__()
+        self.conv1 = nn.Conv3d(in_channels, 32, kernel_size=3, stride=2, padding=1)  # Reduced channels & increased stride
+        self.pool = nn.MaxPool3d(kernel_size=2, stride=2, padding=0)
+        self.conv2 = nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1)  # Added another conv layer with increased stride
+        self.adaptive_pool = nn.AdaptiveAvgPool3d(1)  # Adaptive pooling before FC layers
+        self.fc = nn.Linear(64, num_classes)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = self.pool(x)
+        x = F.relu(self.conv2(x))
+        x = self.adaptive_pool(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        return x
+
 #this loss function is based off of this paper https://github.com/binh234/facial-liveness-detection/blob/main/train.ipynb
 class ContrastiveLoss(torch.nn.Module):
     def __init__(self, margin=1.0):
@@ -40,13 +58,14 @@ class ContrastiveWrapper(nn.Module):
         
         return embedding1, embedding2, output
 
-def model_factory(model_name, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 512):
+def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 512):
     n_classes = contrastive_layer_size if contrastive_mode != "None" else num_classes
-
-    if model_name == "ViT":
+    if model_name == "3DCNN":
+        model = Efficient3DCNN(in_channels=1, num_classes=n_classes)
+    elif model_name == "ViT":
         model = ViTWrapper(
             in_channels=1, 
-            img_size=(128,512,64), 
+            img_size=image_size, 
             patch_size = (16,16,16),
             pos_embed='conv', 
             classification=True, 

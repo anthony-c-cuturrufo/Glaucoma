@@ -25,13 +25,15 @@ import argparse
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train a model on OCTDataset')
-    parser.add_argument('--model_name', type=str, default="ResNext50", help='Name of the model to use (e.g., ResNext50, ViT, etc.)')
+    parser.add_argument('--model_name', type=str, default="ResNext50", help='Name of the model to use (e.g., ResNext50, ViT, 3DCNN, and ResNext121)')
     parser.add_argument('--cuda', type=str, default="cuda:2", help='CUDA device to use (e.g., cuda:0, cuda:1, etc.)')
     parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training and validation')
     parser.add_argument('--dropout', type=float, default=.2, help='Dropout rate for model')
     parser.add_argument('--contrastive_mode', type=str, default="None", help='Contrastive learning mode (e.g. augmentation or MacOp')
     parser.add_argument('--augment', type=bool, default=True, help='Apply data augmentation')
     parser.add_argument('--dataset', type=str, default="local_database8_Macular_SubMRN_v4.csv", help='Dataset filename')
+    parser.add_argument('--image_size', type=lambda s: tuple(map(int, s.split(','))), default=(128,200,200), help='Image size as a tuple (e.g., 128,200,200)')
+
     args = parser.parse_args()
 
     device = args.cuda
@@ -41,6 +43,8 @@ if __name__ == "__main__":
     contrastive_mode = args.contrastive_mode
     augment_data = args.augment
     dataset_name = args.dataset
+    image_size = args.image_size
+
 
     # Create Dataset
     #-------------------------------------------------
@@ -63,8 +67,9 @@ if __name__ == "__main__":
         dataset = OCTDataset(
             dataset_name, 
             transforms, 
-            augment_data = augment_data, 
-            contrastive_mode = contrastive_mode)
+            augment_data     = augment_data, 
+            contrastive_mode = contrastive_mode, 
+            image_size       = image_size)
     print("Done With Dataset")
 
     #Create Dataloader
@@ -85,7 +90,7 @@ if __name__ == "__main__":
     print("Size of Training Set: ", len(train_dataloader))
     print("Size of Validation Set: ", len(val_dataloader))
     #-------------------------------------------------    
-    model = model_factory(model_name, dropout, contrastive_mode=contrastive_mode).to(device)
+    model = model_factory(model_name, image_size, dropout, contrastive_mode=contrastive_mode).to(device)
 
     # define the loss function and optimizer
     loss_function = torch.nn.CrossEntropyLoss()

@@ -6,7 +6,7 @@ from tqdm import tqdm
 from classification.dataloader_utils import *
 
 class OCTDataset(Dataset):
-    def __init__(self, filename, transform, augment_data = True, contrastive_mode = "None"):
+    def __init__(self, filename, transform, augment_data = True, contrastive_mode = "None", image_size = (128, 512, 64)):
         self.transform = transform
         self.contrastive_mode = contrastive_mode
         df = pd.read_csv(filename)
@@ -15,14 +15,15 @@ class OCTDataset(Dataset):
         negs = df[(df.classification == 0) & (df.filepaths != "-1")]
         pos = df[(df.classification == 1) & (df.filepaths != "-1")]
  
-        normal_scans = [process_scan(adjust_filepath(f)) for f in tqdm(negs.filepaths.values[:N])]
-        abnormal_scans = [process_scan(adjust_filepath(f)) for f in tqdm(pos.filepaths.values[:N])]
+        normal_scans = [process_scan(adjust_filepath(f), image_size=image_size) for f in tqdm(negs.filepaths.values[:N])]
+        abnormal_scans = [process_scan(adjust_filepath(f), image_size=image_size) for f in tqdm(pos.filepaths.values[:N])]
 
         unique_pos_pids = list(set(pos.MRN.values[:N]))
         unique_neg_pids = list(set(negs.MRN.values[:N]))
 
-        np.random.shuffle(unique_pos_pids)
-        np.random.shuffle(unique_neg_pids)
+        rng = np.random.RandomState(42)
+        rng.shuffle(unique_pos_pids)
+        rng.shuffle(unique_neg_pids)
 
         val_split = 0.2
         # num_pos_val_patients = int(np.ceil(val_split * len(unique_pos_pids)))
@@ -47,6 +48,10 @@ class OCTDataset(Dataset):
         else:
             normal_scans = np.array(normal_scans)
             abnormal_scans = np.array(abnormal_scans) 
+
+        # add channel dimension
+        normal_scans = np.expand_dims(normal_scans, axis=1)
+        abnormal_scans = np.expand_dims(abnormal_scans, axis=1)
 
         #create labels        
         normal_labels = np.tile([1, 0], (len(normal_scans), 1)).astype(np.float32)

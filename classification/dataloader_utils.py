@@ -40,12 +40,12 @@ def read_image(scan_path):
         data_matrix[:,:,i] = np.fliplr(np.flipud(np.squeeze(data_matrix[:,:,i])))
     return data_matrix
 
-def resize_volume(img):
+def resize_volume(img, image_size):
     """Resize across z-axis"""
     # Set the desired depth
-    desired_depth = 64
-    desired_width = 128
-    desired_height = 512
+    desired_depth = image_size[2]
+    desired_width = image_size[0]
+    desired_height = image_size[1]
     # Get current depth
     current_depth = img.shape[-1]
     current_width = img.shape[0]
@@ -61,7 +61,7 @@ def resize_volume(img):
 #     img = ndimage.rotate(img, 90, reshape=False)
     # Resize across z-axis
     img = ndimage.zoom(img, (width_factor, height_factor, depth_factor), order=1)
-    return np.expand_dims(img, axis=0)
+    return img #np.expand_dims(img, axis=0)
 
 def normalize(volume):
     """Normalize the volume"""
@@ -73,7 +73,7 @@ def normalize(volume):
     volume = volume.astype("float32")
     return volume
 
-def process_scan(path):
+def process_scan(path, image_size):
     img = read_image(path)
     img = normalize(img)
-    return resize_volume(img) 
+    return resize_volume(img, image_size) 
