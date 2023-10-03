@@ -28,7 +28,7 @@ class ContrastiveLoss(torch.nn.Module):
         self.margin = margin
     def forward(self, output1, output2, label):  #output1 is the first embedding #output2 is the second embedding #label for our case will always be 0 "Similar" becaause they are mere augmentations of each other
         euclidean_distance = F.pairwise_distance(output1, output2, keepdim=True) #first compute the euclidian distance between the two
-        loss_contrastive = torch.mean((1 - label) * torch.pow(euclidean_distance, 2)) 
+        loss_contrastive = torch.mean(torch.pow(euclidean_distance, 2)) 
         #+ (label) * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2)) #we only need this line of code if we had dissimilar embeddings but they hshould always be similar because they both have glaucoma or not
         return loss_contrastive
 

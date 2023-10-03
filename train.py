@@ -28,6 +28,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_name', type=str, default="ResNext50", help='Name of the model to use (e.g., ResNext50, ViT, 3DCNN, and ResNext121)')
     parser.add_argument('--cuda', type=str, default="cuda:2", help='CUDA device to use (e.g., cuda:0, cuda:1, etc.)')
     parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training and validation')
+    parser.add_argument('--contrastive_loss', type=int, default=1, help='1 for contrastive loss, 0 for no contrastive loss.')
     parser.add_argument('--dropout', type=float, default=.2, help='Dropout rate for model')
     parser.add_argument('--contrastive_mode', type=str, default="None", help='Contrastive learning mode (e.g. augmentation or MacOp')
     parser.add_argument('--augment', type=bool, default=True, help='Apply data augmentation')
@@ -44,6 +45,7 @@ if __name__ == "__main__":
     augment_data = args.augment
     dataset_name = args.dataset
     image_size = args.image_size
+    use_contrastive_loss = args.contrastive_loss
 
 
     # Create Dataset
@@ -61,7 +63,8 @@ if __name__ == "__main__":
         dataset = OCTDataset_MacOp(
             dataset_name, 
             transforms, 
-            augment_data = False) # TODO allow for data augmentation in MacOp
+            augment_data = False,
+            image_size = image_size) # TODO allow for data augmentation in MacOp
 
     else:
         dataset = OCTDataset(
@@ -134,6 +137,8 @@ if __name__ == "__main__":
                 contrastiveloss_value = contrastiveloss(embedding1,embedding2, labels)
 
             loss = loss_function(outputs, labels)
+
+            contrastiveloss_value = contrastiveloss_value if use_contrastive_loss else 0
             loss = loss + contrastiveloss_value if contrastive_mode != "None" else loss
 
             loss.backward()

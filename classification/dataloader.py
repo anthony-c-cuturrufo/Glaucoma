@@ -105,7 +105,7 @@ Dataset for Contrastive Learning method "MacOp" what creates a siamese model com
 the embedding space of a Macular Scan and Optic Scan from the same patient
 '''
 class OCTDataset_MacOp(Dataset):
-    def __init__(self, filename, transform, augment_data = False):
+    def __init__(self, filename, transform, augment_data = False, image_size = (128, 512, 64)):
         self.transform = transform
         df = pd.read_csv(filename)
         
@@ -115,10 +115,10 @@ class OCTDataset_MacOp(Dataset):
         negs = df[(df.classification == 0)]
         pos = df[(df.classification == 1)]
  
-        macular_normal_scans = [process_scan(adjust_filepath(f)) for f in tqdm(negs.filepaths_macular.values[:N])]
-        macular_abnormal_scans = [process_scan(adjust_filepath(f)) for f in tqdm(pos.filepaths_macular.values[:N])]
-        optic_normal_scans = [process_scan(adjust_filepath(f)) for f in tqdm(negs.filepaths_optic.values[:N])]
-        optic_abnormal_scans = [process_scan(adjust_filepath(f)) for f in tqdm(pos.filepaths_optic.values[:N])]
+        macular_normal_scans = [process_scan(adjust_filepath(f),image_size=image_size) for f in tqdm(negs.filepaths_macular.values[:N])]
+        macular_abnormal_scans = [process_scan(adjust_filepath(f),image_size=image_size) for f in tqdm(pos.filepaths_macular.values[:N])]
+        optic_normal_scans = [process_scan(adjust_filepath(f),image_size=image_size) for f in tqdm(negs.filepaths_optic.values[:N])]
+        optic_abnormal_scans = [process_scan(adjust_filepath(f),image_size=image_size) for f in tqdm(pos.filepaths_optic.values[:N])]
 
         unique_pos_pids = list(set(pos.MRN.values[:N]))
         unique_neg_pids = list(set(negs.MRN.values[:N]))
@@ -151,6 +151,12 @@ class OCTDataset_MacOp(Dataset):
 
         macular_abnormal_scans = np.array(macular_abnormal_scans) 
         optic_abnormal_scans = np.array(optic_abnormal_scans) 
+
+        # add channel dimension
+        macular_normal_scans = np.expand_dims(macular_normal_scans, axis=1)
+        macular_abnormal_scans = np.expand_dims(macular_abnormal_scans, axis=1)
+        optic_normal_scans = np.expand_dims(optic_normal_scans, axis=1)
+        optic_abnormal_scans = np.expand_dims(optic_abnormal_scans, axis=1)
 
         #create labels        
         normal_labels = np.tile([1, 0], (len(macular_normal_scans), 1)).astype(np.float32)
