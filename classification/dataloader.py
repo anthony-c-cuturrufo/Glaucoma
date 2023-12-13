@@ -105,26 +105,20 @@ Dataset for Contrastive Learning method "MacOp" what creates a siamese model com
 the embedding space of a Macular Scan and Optic Scan from the same patient
 '''
 class OCTDataset_MacOp(Dataset):
-    def __init__(self, filename, transform, augment_data = False, image_size = (128, 512, 64)):
+    def __init__(self, macular_normal_scans, macular_abnormal_scans, optic_normal_scans, optic_abnormal_scans, df, transform, mode='train'):
         self.transform = transform
-        df = pd.read_csv(filename)
         
-        N = len(df[(df.classification == 0)])
-        augment_data = False 
-        
+        N = len(df[(df.classification == 0)])        
         negs = df[(df.classification == 0)]
         pos = df[(df.classification == 1)]
  
-        macular_normal_scans = [process_scan(adjust_filepath(f),image_size=image_size) for f in tqdm(negs.filepaths_macular.values[:N])]
-        macular_abnormal_scans = [process_scan(adjust_filepath(f),image_size=image_size) for f in tqdm(pos.filepaths_macular.values[:N])]
-        optic_normal_scans = [process_scan(adjust_filepath(f),image_size=image_size) for f in tqdm(negs.filepaths_optic.values[:N])]
-        optic_abnormal_scans = [process_scan(adjust_filepath(f),image_size=image_size) for f in tqdm(pos.filepaths_optic.values[:N])]
 
         unique_pos_pids = list(set(pos.MRN.values[:N]))
         unique_neg_pids = list(set(negs.MRN.values[:N]))
 
-        np.random.shuffle(unique_pos_pids)
-        np.random.shuffle(unique_neg_pids)
+        rng = np.random.RandomState(42)
+        rng.shuffle(unique_pos_pids)
+        rng.shuffle(unique_neg_pids)
 
         val_split = 0.2
         # num_pos_val_patients = int(np.ceil(val_split * len(unique_pos_pids)))
@@ -196,3 +190,62 @@ class OCTDataset_MacOp(Dataset):
         }
 
         return data_point,aux_point
+    
+
+
+class ScanDataset(Dataset):
+    def __init__(self, data, targets, transform, contrastive_mode='None'):
+        super(ScanDataset, self).__init__()
+
+        self.data = (torch.tensor(data[0], dtype=torch.float32), torch.tensor(data[1], dtype=torch.float32)) if contrastive_mode == "MacOp" else torch.tensor(data, dtype=torch.float32)
+        self.targets = torch.tensor(targets, dtype=torch.float32)
+        self.transform = transform 
+        self.contrastive_mode = contrastive_mode
+
+    def __len__(self):
+        return len(self.targets)
+
+    def __getitem__(self, index):
+        if self.contrastive_mode == "None":
+            data_point = {
+                "data": self.transform(self.data[index]) if self.transform else self.data[index],
+                "target": self.targets[index],
+            }
+            return data_point 
+        elif self.contrastive_mode == "augmentation":
+            data = self.data[index]
+            aux  = self.data[index]
+            if self.transform:
+                data = self.transform(data)
+                aux = self.transform(aux)
+            data_point = {
+                "data": data,
+                "aux" : aux,
+                "target": self.targets[index],
+            }
+            aux_point = {
+                "data": aux,
+                "target": self.targets[index],
+            }
+
+            return data_point,aux_point
+        else:
+            data = self.data[0][index]
+            aux  = self.data[1][index]
+            if self.transform:
+                data = self.transform(data)
+                aux = self.transform(aux)
+            
+            data_point = {
+                "data": data,
+                "aux" : aux,
+                "target": self.targets[index],
+            }
+
+            aux_point = {
+                "data": aux,
+                "target": self.targets[index],
+            }
+
+            return data_point,aux_point
+

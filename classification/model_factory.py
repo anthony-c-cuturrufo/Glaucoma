@@ -2,6 +2,32 @@ import monai
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
+from classification.models import * 
+
+class MedicalNet(nn.Module):
+
+  def __init__(self, path_to_weights, device, dropout_prob):
+    super(MedicalNet, self).__init__()
+    self.model = resnet200(sample_input_D=1024, sample_input_H=200, sample_input_W=200, num_seg_classes=2)
+    self.model.conv_seg = nn.Sequential(
+        nn.AdaptiveMaxPool3d(output_size=(1, 1, 1)),
+        nn.Flatten(start_dim=1),
+        nn.Dropout(dropout_prob)
+    )
+    # net_dict = self.model.state_dict()
+    # pretrained_weights = torch.load(path_to_weights, map_location=torch.device("cuda:0"))
+    # pretrain_dict = {
+    #     k.replace("module.", ""): v for k, v in pretrained_weights['state_dict'].items() if k.replace("module.", "") in net_dict.keys()
+    #   }
+    # net_dict.update(pretrain_dict)
+    # self.model.load_state_dict(net_dict)
+    self.fc = nn.Sequential(nn.Linear(2048, 512), nn.ReLU(), nn.Linear(512, 2))
+    # self.fc = nn.Linear(2048, 2)
+
+  def forward(self, x):
+    features = self.model(x)
+    return self.fc(features)
+
 
 class Efficient3DCNN(nn.Module):
     def __init__(self, in_channels, num_classes):
@@ -57,8 +83,35 @@ class ContrastiveWrapper(nn.Module):
         output = self.fc(output)
         
         return embedding1, embedding2, output
+    
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=0.25, gamma=2, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
 
-def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 512):
+    def forward(self, inputs, targets):
+        # Compute the cross entropy loss
+        CE_loss = F.cross_entropy(inputs, targets, reduction='none')
+        
+        # Get the probabilities of the target class
+        pt = torch.exp(-CE_loss)
+
+        # Compute the focal loss
+        alpha_tensor = torch.tensor([self.alpha, 1-self.alpha]).to(inputs.device)
+        alpha_t = alpha_tensor[targets.data.view(-1).long()].view(-1, 1)
+
+        F_loss = alpha_t * (1 - pt) ** self.gamma * CE_loss
+
+        if self.reduction == 'mean':
+            return F_loss.mean()
+        elif self.reduction == 'sum':
+            return F_loss.sum()
+        else:
+            return F_loss
+
+def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 512, device="cuda",path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
     n_classes = contrastive_layer_size if contrastive_mode != "None" else num_classes
     if model_name == "3DCNN":
         model = Efficient3DCNN(in_channels=1, num_classes=n_classes)
@@ -84,6 +137,21 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
             in_channels=1,
             num_classes=n_classes,
             dropout_prob=dropout)
+    elif model_name == "SEResNet152":
+        model = monai.networks.nets.SEResNet152(
+            spatial_dims=3,
+            in_channels=1,
+            num_classes=n_classes,
+            dropout_prob=dropout)
+    elif model_name == "MedicalNet":
+        model = MedicalNet(path_to_weights=path_to_weights, device=device,dropout_prob=dropout)
+        for param_name, param in model.named_parameters():
+            print(param_name)
+            if param_name.startswith("fc"):
+                param.requires_grad = True
+            else:
+                param.requires_grad = True
+
     else:
         raise ValueError(f"The model name {model_name} is not accepted.")
     
