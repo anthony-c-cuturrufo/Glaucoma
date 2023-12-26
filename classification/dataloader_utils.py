@@ -80,7 +80,7 @@ def process_scan(path, image_size):
     img = normalize(img)
     return resize_volume(img, image_size) 
 
-def custom_train_val_split(negs, pos, fixed_count, val_split):
+def custom_train_val_split(negs, pos, fixed_count, neg_val_split, pos_val_split):
     np.random.seed(42)  # Ensures reproducibility
 
     # Select fixed MRNs for training set
@@ -98,6 +98,7 @@ def custom_train_val_split(negs, pos, fixed_count, val_split):
     remaining_pos -= overlap_pids
     remaining_negs -= overlap_pids
 
+    # for precompute
     # print("remaining_pos.shape: ", len(remaining_pos)) # 478
     # print("remaining_neg.shape: ", len(remaining_negs)) # 49
     # print("overlap_pids.shape: ", len(overlap_pids)) # 0
@@ -111,8 +112,8 @@ def custom_train_val_split(negs, pos, fixed_count, val_split):
         split_point = int(len(id_list) * split_ratio)
         return set(id_list[:split_point]), set(id_list[split_point:])
 
-    val_neg, train_neg = split_ids(remaining_negs, val_split*2)
-    val_pos, train_pos = split_ids(remaining_pos, val_split)
+    val_neg, train_neg = split_ids(remaining_negs, neg_val_split)
+    val_pos, train_pos = split_ids(remaining_pos, pos_val_split)
 
      # Split overlap IDs
     half_overlap = len(overlap_pids) // 2
@@ -161,7 +162,7 @@ def train_val_split(pos, neg, val_split=0.2):
 
     return train_patient_ids, val_patient_ids
 
-def process_scans(df, image_size=(128, 200, 200), contrastive_mode='None', imbalance_factor=1.1, test=False):
+def process_scans(df, image_size=(128, 200, 200), contrastive_mode='None', imbalance_factor=1.1, add_denoise=False, test=False):
     negs = df[(df.classification == 0)]
     pos = df[(df.classification == 1) ]
     N = 10 if test else min(len(negs), len(pos)) 
@@ -169,7 +170,7 @@ def process_scans(df, image_size=(128, 200, 200), contrastive_mode='None', imbal
     negs = negs[:N]
     pos = pos[:int(imbalance_factor*N)]
 
-    train_patient_ids, val_patient_ids = train_val_split(negs, pos, val_split=.2)
+    train_patient_ids, val_patient_ids =  custom_train_val_split(negs, pos, fixed_count=160, neg_val_split=.3, pos_val_split=.2) if add_denoise else train_val_split(negs, pos, val_split=.2) 
 
     combined_df = pd.concat([pos, negs], axis=0).reset_index(drop=True)
     
@@ -197,6 +198,21 @@ def process_scans(df, image_size=(128, 200, 200), contrastive_mode='None', imbal
     # Split data into train and validation
     train_data, val_data = data[train_indices], data[val_indices]
     train_targets, val_targets = targets[train_indices], targets[val_indices]
+
+    if add_denoise:
+        print("Loading Denoised Data Augmentations")
+        denoised_neg = np.load("/local2/acc/Denoised_Glaucoma_Data/denoised_neg.npy")
+        denoised_pos = np.load("/local2/acc/Denoised_Glaucoma_Data/denoised_pos.npy")
+
+        print("Transposing Denoised Augmentations")
+        denoised_neg_transposed = np.transpose(denoised_neg, (3, 0, 1, 2))
+        denoised_neg_transposed = np.expand_dims(denoised_neg_transposed, axis=1)
+
+        denoised_pos_transposed = np.transpose(denoised_pos, (3, 0, 1, 2))
+        denoised_pos_transposed = np.expand_dims(denoised_pos_transposed, axis=1)
+
+        train_data = np.concatenate([train_data, denoised_pos_transposed, denoised_neg_transposed])
+        train_targets = np.concatenate([train_targets, create_labels(denoised_pos_transposed, [0, 1]), create_labels(denoised_neg_transposed, [1, 0])])
 
     if contrastive_mode == "MacOp":
         optic_normal_scans, optic_abnormal_scans = map(scans_from_df, [negs.filepaths_optic, pos.filepaths_optic])
@@ -242,7 +258,7 @@ def precompute_dataset(df, transforms, image_size=(128, 200, 200), contrastive_m
     pos = pos[:2*N]
 
     # Perform train-validation split
-    train_patient_ids, val_patient_ids = custom_train_val_split(negs, pos, fixed_count=160, val_split=0.2)
+    train_patient_ids, val_patient_ids = custom_train_val_split(negs, pos, fixed_count=160, neg_val_split=0.4, pos_val_split=.2)
 
     combined_df = pd.concat([pos, negs], axis=0).reset_index(drop=True)
 

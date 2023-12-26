@@ -194,23 +194,30 @@ class OCTDataset_MacOp(Dataset):
 
 
 class ScanDataset(Dataset):
-    def __init__(self, data, targets, transform, contrastive_mode='None'):
+    def __init__(self, data, targets, transform, add_denoise=False, contrastive_mode='None'):
         super(ScanDataset, self).__init__()
 
         self.data = (torch.tensor(data[0], dtype=torch.float32), torch.tensor(data[1], dtype=torch.float32)) if contrastive_mode == "MacOp" else torch.tensor(data, dtype=torch.float32)
         self.targets = torch.tensor(targets, dtype=torch.float32)
         self.transform = transform 
         self.contrastive_mode = contrastive_mode
+        self.add_denoise = add_denoise
 
     def __len__(self):
         return len(self.targets)
 
     def __getitem__(self, index):
         if self.contrastive_mode == "None":
-            data_point = {
-                "data": self.transform(self.data[index]) if self.transform else self.data[index],
-                "target": self.targets[index],
-            }
+            if self.add_denoise and index > (len(self.targets) - (150 * 2)):
+                data_point = {
+                    "data": self.data[index],
+                    "target": self.targets[index],
+                }
+            else:
+                data_point = {
+                    "data": self.transform(self.data[index]) if self.transform else self.data[index],
+                    "target": self.targets[index],
+                }
             return data_point 
         elif self.contrastive_mode == "augmentation":
             data = self.data[index]

@@ -38,9 +38,9 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, default="local_database8_Macular_SubMRN_v4.csv", help='Dataset filename')
     parser.add_argument('--image_size', type=lambda s: tuple(map(int, s.split(','))), default=(128,200,200), help='Image size as a tuple (e.g., 128,200,200)')
     parser.add_argument('--epochs', type=int, default=500, help='Number of epochs for training')
-    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay')
-    parser.add_argument('--add_denoise', type=bool, default=True, help='Add denoised scans (only supported for --precompute option)')
+    parser.add_argument('--add_denoise', type=bool, default=False, help='Add denoised scans (only supported for contrastive_mode = None)')
     parser.add_argument('--prob', type=float, default=.5, help='Probability of transformation (e.g .5)')
     parser.add_argument('--imbalance_factor', type=float, default=1.1, help='Multiplicative factor to increase number of glaucoma scans')
     parser.add_argument('--use_focal_loss', type=bool, default=False, help='Use Focal Loss as opposed to Cross Entropy Loss')
@@ -95,9 +95,9 @@ if __name__ == "__main__":
         train_dataset = ScanDataset(train_data, train_targets, None, contrastive_mode=contrastive_mode)
         val_dataset = ScanDataset(val_data, val_targets, None, contrastive_mode=contrastive_mode)
     else:
-        train_data, val_data, train_targets, val_targets = process_scans(df, image_size=image_size, contrastive_mode=contrastive_mode,imbalance_factor=imbalance_factor, test=test)
+        train_data, val_data, train_targets, val_targets = process_scans(df, image_size=image_size, contrastive_mode=contrastive_mode,imbalance_factor=imbalance_factor, add_denoise=add_denoise, test=test)
         print("Finished processing data")
-        train_dataset = ScanDataset(train_data, train_targets, transforms, contrastive_mode=contrastive_mode)
+        train_dataset = ScanDataset(train_data, train_targets, transforms, add_denoise=add_denoise, contrastive_mode=contrastive_mode)
         val_dataset = ScanDataset(val_data, val_targets, None, contrastive_mode=contrastive_mode)
     train_sampler = DistributedSampler(train_dataset)
     val_sampler = DistributedSampler(val_dataset)
@@ -208,9 +208,10 @@ if __name__ == "__main__":
 
                 try:
                     spec = float(tn)/(float(tn) + float(fp))
+                    sens = float(tp)/(float(tp) + float(fn))
                 except:
                     spec = 0
-                
+                    sens = 0
                 try: 
                     auc = roc_auc_score(gts, pred_probs, labels=[0,1])
                 except:
@@ -249,6 +250,7 @@ if __name__ == "__main__":
                 writer.add_scalar("val_recall", recall,  epoch + 1)
                 writer.add_scalar("val_prec", prec, epoch + 1)
                 writer.add_scalar("val_spec", spec, epoch + 1)
+                writer.add_scalar("val_sens", sens, epoch + 1)
                 writer.add_scalar("val_tp", tp, epoch + 1)
                 writer.add_scalar("val_fp", fp, epoch + 1)
                 writer.add_scalar("val_tn", tn, epoch + 1)
