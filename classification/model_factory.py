@@ -28,24 +28,36 @@ class MedicalNet(nn.Module):
     features = self.model(x)
     return self.fc(features)
 
-
+    
 class Efficient3DCNN(nn.Module):
-    def __init__(self, in_channels, num_classes):
+    def __init__(self, in_channels, num_classes, conv_layers=[32,64], fc_layers=[], dropout_rate=0.5):
         super(Efficient3DCNN, self).__init__()
-        self.conv1 = nn.Conv3d(in_channels, 32, kernel_size=3, stride=2, padding=1)  # Reduced channels & increased stride
-        self.pool = nn.MaxPool3d(kernel_size=2, stride=2, padding=0)
-        self.conv2 = nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1)  # Added another conv layer with increased stride
-        self.adaptive_pool = nn.AdaptiveAvgPool3d(1)  # Adaptive pooling before FC layers
-        self.fc = nn.Linear(64, num_classes)
+
+        # Conv3D layers
+        layers = [nn.Conv3d(in_channels if i == 0 else conv_layers[i-1], 
+                            conv_layers[i], kernel_size=3, stride=2, padding=1) 
+                  for i in range(len(conv_layers))]
+        self.conv_layers = nn.Sequential(*layers, nn.MaxPool3d(kernel_size=2, stride=2, padding=0))
+
+        self.adaptive_pool = nn.AdaptiveAvgPool3d(1)  # Correct placement
+
+        # FC layers
+        in_features = conv_layers[-1]
+        self.fc_layers = nn.Sequential()
+        for out_features in fc_layers:
+            self.fc_layers.add_module('fc', nn.Linear(in_features, out_features))
+            self.fc_layers.add_module('dropout', nn.Dropout(dropout_rate))
+            in_features = out_features
+        self.fc_layers.add_module('fc_final', nn.Linear(in_features, num_classes))
 
     def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = self.pool(x)
-        x = F.relu(self.conv2(x))
-        x = self.adaptive_pool(x)
+        x = self.conv_layers(x)
+        x = self.adaptive_pool(x)  # Apply adaptive pooling here
         x = x.view(x.size(0), -1)
-        x = self.fc(x)
+        x = self.fc_layers(x)
         return x
+
+
 
 #this loss function is based off of this paper https://github.com/binh234/facial-liveness-detection/blob/main/train.ipynb
 class ContrastiveLoss(torch.nn.Module):
@@ -65,6 +77,23 @@ class ViTWrapper(nn.Module):
 
     def forward(self, x):
         output, _ = self.vit(x)  # Get output and ignore hidden state
+        return output
+    
+class ResNet18Wrapper(nn.Module):
+    def __init__(self, dropout_prob=.2, *args, **kwargs):
+        super(ResNet18Wrapper, self).__init__()
+        self.resnet = monai.networks.nets.resnet18(*args, **kwargs)
+        # self.fc1 = nn.Linear(512, 64)
+        # self.fc2 = nn.Linear(64, 2)
+        self.fc3 = nn.Linear(512, 2)
+        # self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout_prob)
+
+    def forward(self, x):
+        output = self.resnet(x)
+        output = self.fc3(self.dropout(output))
+
+        # output = self.fc2(self.relu(self.fc1(output)))
         return output
 
 class ContrastiveWrapper(nn.Module):
@@ -111,10 +140,10 @@ class FocalLoss(nn.Module):
         else:
             return F_loss
 
-def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 512, device="cuda",path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
+def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 512, device="cuda", conv_layers = [32,64], fc_layers = [16], pretrained=True, path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
     n_classes = contrastive_layer_size if contrastive_mode != "None" else num_classes
     if model_name == "3DCNN":
-        model = Efficient3DCNN(in_channels=1, num_classes=n_classes)
+        model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
     elif model_name == "ViT":
         model = ViTWrapper(
             in_channels=1, 
@@ -151,6 +180,28 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
                 param.requires_grad = True
             else:
                 param.requires_grad = True
+    elif model_name == "ResNet10":
+        model = monai.networks.nets.resnet10(
+            spatial_dims=3,
+            n_input_channels=1,
+            num_classes=2)
+    elif model_name == "ResNet18":
+        if pretrained:
+            model = ResNet18Wrapper(
+                dropout_prob=dropout,
+                spatial_dims=3,
+                n_input_channels=1,
+                num_classes=2, 
+                pretrained=True,
+                feed_forward=False, 
+                shortcut_type="A",
+                bias_downsample=False
+            )
+        else:
+            model = monai.networks.nets.resnet18(
+                spatial_dims=3,
+                n_input_channels=1,
+                num_classes=2)
 
     else:
         raise ValueError(f"The model name {model_name} is not accepted.")

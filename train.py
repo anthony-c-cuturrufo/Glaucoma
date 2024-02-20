@@ -11,7 +11,7 @@ from monai.transforms import (
     RandAffine,
 )
 from torch.utils.data import DataLoader
-from classification.dataloader import OCTDataset, OCTDataset_MacOp, ScanDataset
+from classification.dataloader import ScanDataset
 from classification.model_factory import model_factory, ContrastiveLoss, FocalLoss
 from classification.dataloader_utils import process_scans, precompute_dataset, split_and_process
 import argparse
@@ -35,7 +35,6 @@ if __name__ == "__main__":
     parser.add_argument('--dropout', type=float, default=.2, help='Dropout rate for model')
     parser.add_argument('--contrastive_mode', type=str, default="None", help='Contrastive learning mode (e.g. augmentation or MacOp')
     parser.add_argument('--augment', type=bool, default=True, help='Apply data augmentation')
-    parser.add_argument('--test', type=bool, default=False, help='Test training pipeline with only first 10 scans')
     parser.add_argument('--dataset', type=str, default="database11_Macular_SubMRN_v4.csv", help='Dataset filename')
     parser.add_argument('--image_size', type=lambda s: tuple(map(int, s.split(','))), default=(128,200,200), help='Image size as a tuple (e.g., 128,200,200)')
     parser.add_argument('--epochs', type=int, default=800, help='Number of epochs for training')
@@ -57,7 +56,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     num_workers = 4
-    # device = args.cuda
     device = torch.device(f"cuda:{local_rank}")
 
     model_name = args.model_name
@@ -75,13 +73,14 @@ if __name__ == "__main__":
     prob = args.prob
     imbalance_factor = args.imbalance_factor
     split = args.split
-    num_gpus = dist.get_world_size()
-    region = "Macular" if "Macular" in dataset_name else "Optic"
     conv_layers = args.conv_layers
     fc_layers = args.fc_layers
     warmup_epochs = args.warmup_epochs
     cos_anneal = args.cos_anneal
     loss_f = args.loss_f
+
+    num_gpus = dist.get_world_size()
+    region = "Macular" if "Macular" in dataset_name else "Optic"
 
     print(args)
 
@@ -132,7 +131,7 @@ if __name__ == "__main__":
         loss_function = torch.nn.CrossEntropyLoss(weight=weights)
     else:
         loss_function = torch.nn.CrossEntropyLoss()
-    contrastiveloss = ContrastiveLoss()
+    # contrastiveloss = ContrastiveLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     if cos_anneal != -1:
@@ -189,16 +188,16 @@ if __name__ == "__main__":
             if contrastive_mode == "None":
                 inputs, labels = batch_data['data'].to(device), batch_data['target'].to(device)
                 outputs = model(inputs)
-                contrastiveloss_value = 0
-            else:
-                inputs, aux, labels = batch_data[0]['data'].to(device), batch_data[0]['aux'].to(device), batch_data[0]['target'].to(device)
-                embedding1,embedding2,outputs = model(inputs,aux)
-                contrastiveloss_value = contrastiveloss(embedding1,embedding2, labels)
+                # contrastiveloss_value = 0
+            # else:
+            #     inputs, aux, labels = batch_data[0]['data'].to(device), batch_data[0]['aux'].to(device), batch_data[0]['target'].to(device)
+            #     embedding1,embedding2,outputs = model(inputs,aux)
+            #     contrastiveloss_value = contrastiveloss(embedding1,embedding2, labels)
 
             loss = loss_function(outputs, labels)
 
-            contrastiveloss_value = contrastiveloss_value if use_contrastive_loss else 0
-            loss = loss + contrastiveloss_value if contrastive_mode != "None" else loss
+            # contrastiveloss_value = contrastiveloss_value if use_contrastive_loss else 0
+            # loss = loss + contrastiveloss_value if contrastive_mode != "None" else loss
             correct_predictions += (outputs.argmax(dim=1) == labels.argmax(dim=1)).sum().item()
             total_predictions += labels.size(0)
 
@@ -237,9 +236,9 @@ if __name__ == "__main__":
                     if contrastive_mode == "None":
                         val_images, val_labels = val_data['data'].to(device), val_data['target'].to(device)
                         val_outputs = model(val_images).to(device)
-                    else:
-                        val_images,val_aux, val_labels = val_data[0]['data'].to(device), val_data[0]['aux'].to(device), val_data[0]['target'].cpu()
-                        val_embedding1,val_embedding2, val_outputs = model(val_images,val_aux)
+                    # else:
+                    #     val_images,val_aux, val_labels = val_data[0]['data'].to(device), val_data[0]['aux'].to(device), val_data[0]['target'].cpu()
+                    #     val_embedding1,val_embedding2, val_outputs = model(val_images,val_aux)
                    
                     preds = val_outputs.argmax(dim=1)
                     labels = val_labels.argmax(dim=1)
