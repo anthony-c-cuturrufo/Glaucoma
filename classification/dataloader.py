@@ -61,11 +61,5 @@ class ScanDataset(Dataset):
                 "aux" : aux,
                 "target": self.targets[index],
             }
-
-            aux_point = {
-                "data": aux,
-                "target": self.targets[index],
-            }
-
-            return data_point,aux_point
+            return data_point
 

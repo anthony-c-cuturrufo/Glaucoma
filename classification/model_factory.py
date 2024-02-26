@@ -2,18 +2,18 @@ import monai
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
-from classification.models import * 
+# from classification.models import * 
 
-class MedicalNet(nn.Module):
+# class MedicalNet(nn.Module):
 
-  def __init__(self, path_to_weights, device, dropout_prob):
-    super(MedicalNet, self).__init__()
-    self.model = resnet200(sample_input_D=1024, sample_input_H=200, sample_input_W=200, num_seg_classes=2)
-    self.model.conv_seg = nn.Sequential(
-        nn.AdaptiveMaxPool3d(output_size=(1, 1, 1)),
-        nn.Flatten(start_dim=1),
-        nn.Dropout(dropout_prob)
-    )
+#   def __init__(self, path_to_weights, device, dropout_prob):
+#     super(MedicalNet, self).__init__()
+#     self.model = resnet200(sample_input_D=1024, sample_input_H=200, sample_input_W=200, num_seg_classes=2)
+#     self.model.conv_seg = nn.Sequential(
+#         nn.AdaptiveMaxPool3d(output_size=(1, 1, 1)),
+#         nn.Flatten(start_dim=1),
+#         nn.Dropout(dropout_prob)
+#     )
     # net_dict = self.model.state_dict()
     # pretrained_weights = torch.load(path_to_weights, map_location=torch.device("cuda:0"))
     # pretrain_dict = {
@@ -21,12 +21,12 @@ class MedicalNet(nn.Module):
     #   }
     # net_dict.update(pretrain_dict)
     # self.model.load_state_dict(net_dict)
-    self.fc = nn.Sequential(nn.Linear(2048, 512), nn.ReLU(), nn.Linear(512, 2))
+    # self.fc = nn.Sequential(nn.Linear(2048, 512), nn.ReLU(), nn.Linear(512, 2))
     # self.fc = nn.Linear(2048, 2)
 
-  def forward(self, x):
-    features = self.model(x)
-    return self.fc(features)
+#   def forward(self, x):
+#     features = self.model(x)
+#     return self.fc(features)
 
     
 class Efficient3DCNN(nn.Module):
@@ -79,10 +79,13 @@ class ViTWrapper(nn.Module):
         output, _ = self.vit(x)  # Get output and ignore hidden state
         return output
     
-class ResNet18Wrapper(nn.Module):
-    def __init__(self, dropout_prob=.2, *args, **kwargs):
-        super(ResNet18Wrapper, self).__init__()
-        self.resnet = monai.networks.nets.resnet18(*args, **kwargs)
+class ResNetWrapper(nn.Module):
+    def __init__(self, name, dropout_prob=.2, *args, **kwargs):
+        super(ResNetWrapper, self).__init__()
+        if name == "ResNet10":
+            self.resnet = monai.networks.nets.resnet10(*args, **kwargs)
+        else:
+            self.resnet = monai.networks.nets.resnet18(*args, **kwargs)
         # self.fc1 = nn.Linear(512, 64)
         # self.fc2 = nn.Linear(64, 2)
         self.fc3 = nn.Linear(512, 2)
@@ -95,23 +98,40 @@ class ResNet18Wrapper(nn.Module):
 
         # output = self.fc2(self.relu(self.fc1(output)))
         return output
-
+    
 class ContrastiveWrapper(nn.Module):
-    def __init__(self, base_model, contrastive_layer_size, num_classes):
+    def __init__(self, base_model, contrastive_layer_size, num_classes, dropout_rate, join_method='concat'):
         super(ContrastiveWrapper, self).__init__()
         self.base_model = base_model
-        self.fc = nn.Linear(contrastive_layer_size, num_classes)
+        self.join_method = join_method
         self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout_rate)
+
+        # Adjust the input size of the fully connected layer based on the joining method
+        if join_method == 'concat':
+            fc_input_size = 2 * contrastive_layer_size
+        elif join_method == 'sum':
+            fc_input_size = contrastive_layer_size
+        else:
+            raise ValueError("join_method must be either 'concat' or 'sum'")
+
+        self.fc = nn.Linear(fc_input_size, num_classes)
 
     def forward(self, x1, x2):
         embedding1 = self.base_model(x1)
         embedding2 = self.base_model(x2)
-        
-        output = self.base_model(x1)
-        output = self.relu(output)
+
+        # Joining the embeddings
+        if self.join_method == 'concat':
+            combined = torch.cat((embedding1, embedding2), dim=1)
+        elif self.join_method == 'sum':
+            combined = embedding1 + embedding2
+
+        output = self.relu(combined)
+        output = self.dropout(output)
         output = self.fc(output)
-        
-        return embedding1, embedding2, output
+
+        return output
     
 class FocalLoss(nn.Module):
     def __init__(self, alpha=0.25, gamma=2, reduction='mean'):
@@ -140,7 +160,7 @@ class FocalLoss(nn.Module):
         else:
             return F_loss
 
-def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 512, device="cuda", conv_layers = [32,64], fc_layers = [16], pretrained=True, path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
+def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 128, device="cuda", conv_layers = [32,64], fc_layers = [16], pretrained=True, path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
     n_classes = contrastive_layer_size if contrastive_mode != "None" else num_classes
     if model_name == "3DCNN":
         model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
@@ -172,26 +192,36 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
             in_channels=1,
             num_classes=n_classes,
             dropout_prob=dropout)
-    elif model_name == "MedicalNet":
-        model = MedicalNet(path_to_weights=path_to_weights, device=device,dropout_prob=dropout)
-        for param_name, param in model.named_parameters():
-            print(param_name)
-            if param_name.startswith("fc"):
-                param.requires_grad = True
-            else:
-                param.requires_grad = True
+    # elif model_name == "MedicalNet":
+    #     model = MedicalNet(path_to_weights=path_to_weights, device=device,dropout_prob=dropout)
+    #     for param_name, param in model.named_parameters():
+    #         print(param_name)
+    #         if param_name.startswith("fc"):
+    #             param.requires_grad = True
+    #         else:
+    #             param.requires_grad = True
     elif model_name == "ResNet10":
-        model = monai.networks.nets.resnet10(
-            spatial_dims=3,
-            n_input_channels=1,
-            num_classes=2)
-    elif model_name == "ResNet18":
         if pretrained:
-            model = ResNet18Wrapper(
+            model = ResNetWrapper(
+                model_name,
                 dropout_prob=dropout,
                 spatial_dims=3,
                 n_input_channels=1,
-                num_classes=2, 
+                num_classes=n_classes, 
+                pretrained=True,
+                feed_forward=False, 
+                shortcut_type="B",
+                bias_downsample=False)
+        else:
+            raise ValueError("No training from scratch implemented")
+    elif model_name == "ResNet18":
+        if pretrained:
+            model = ResNetWrapper(
+                model_name,
+                dropout_prob=dropout,
+                spatial_dims=3,
+                n_input_channels=1,
+                num_classes=n_classes, 
                 pretrained=True,
                 feed_forward=False, 
                 shortcut_type="A",
@@ -201,14 +231,14 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
             model = monai.networks.nets.resnet18(
                 spatial_dims=3,
                 n_input_channels=1,
-                num_classes=2)
+                num_classes=n_classes)
 
     else:
         raise ValueError(f"The model name {model_name} is not accepted.")
     
 
-    if contrastive_mode in ["augmentation", "MacOp"]:
-        return ContrastiveWrapper(model, contrastive_layer_size, num_classes)
+    if contrastive_mode != "None":
+        return ContrastiveWrapper(model, contrastive_layer_size, num_classes, dropout_rate=dropout)
     else:
         return model 
     
