@@ -2,6 +2,10 @@ import monai
 import torch 
 import torch.nn as nn
 import torch.nn.functional as F
+
+from monai.networks.nets import SENet
+from monai.networks.blocks.squeeze_and_excitation import SEResNeXtBottleneck
+
 # from classification.models import * 
 
 # class MedicalNet(nn.Module):
@@ -46,6 +50,7 @@ class Efficient3DCNN(nn.Module):
         self.fc_layers = nn.Sequential()
         for out_features in fc_layers:
             self.fc_layers.add_module('fc', nn.Linear(in_features, out_features))
+            self.fc_layers.add_module('relu', nn.ReLU())
             self.fc_layers.add_module('dropout', nn.Dropout(dropout_rate))
             in_features = out_features
         self.fc_layers.add_module('fc_final', nn.Linear(in_features, num_classes))
@@ -80,23 +85,34 @@ class ViTWrapper(nn.Module):
         return output
     
 class ResNetWrapper(nn.Module):
-    def __init__(self, name, dropout_prob=.2, *args, **kwargs):
+    def __init__(self, name, dropout_prob=.2, freeze=False, fc_layers=[], *args, **kwargs):
         super(ResNetWrapper, self).__init__()
         if name == "ResNet10":
             self.resnet = monai.networks.nets.resnet10(*args, **kwargs)
-        else:
+            self.fc_size = 512
+        elif name == "ResNet18":
             self.resnet = monai.networks.nets.resnet18(*args, **kwargs)
-        # self.fc1 = nn.Linear(512, 64)
-        # self.fc2 = nn.Linear(64, 2)
-        self.fc3 = nn.Linear(512, 2)
-        # self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(dropout_prob)
+            self.fc_size = 512
+        else:
+            self.resnet = monai.networks.nets.resnet50(*args, **kwargs)
+            self.fc_size = 2048
+
+        if freeze:
+            for param in self.resnet.parameters():
+                param.requires_grad = False
+
+        in_features = self.fc_size
+        self.fc_layers = nn.Sequential()
+        for out_features in fc_layers:
+            self.fc_layers.add_module('fc', nn.Linear(in_features, out_features))
+            self.fc_layers.add_module('relu', nn.ReLU())
+            self.fc_layers.add_module('dropout', nn.Dropout(dropout_prob))
+            in_features = out_features
+        self.fc_layers.add_module('fc_final', nn.Linear(in_features, 2))
 
     def forward(self, x):
         output = self.resnet(x)
-        output = self.fc3(self.dropout(output))
-
-        # output = self.fc2(self.relu(self.fc1(output)))
+        output = self.fc_layers(output)
         return output
     
 class ContrastiveWrapper(nn.Module):
@@ -160,7 +176,7 @@ class FocalLoss(nn.Module):
         else:
             return F_loss
 
-def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 128, device="cuda", conv_layers = [32,64], fc_layers = [16], pretrained=True, path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
+def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 128, device="cuda", conv_layers = [32,64], fc_layers = [16], pretrained=True, freeze=False, path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
     n_classes = contrastive_layer_size if contrastive_mode != "None" else num_classes
     if model_name == "3DCNN":
         model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
@@ -174,6 +190,21 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
             post_activation = "None",
             dropout_rate = dropout,
             num_classes = n_classes)
+    elif model_name == "ResNext10":
+        block = SEResNeXtBottleneck # ResNeXt bottleneck block
+        layers = [1, 1, 1, 1] # Total 4 layers with 1 block each (to make it 10 layers, adjust these numbers)
+        groups = 32 # Number of groups for ResNeXt, typical values are 32 or 64
+        reduction = 16 # Reduction ratio for SE module
+        model = SENet(
+            spatial_dims=3,
+            in_channels=1,
+            num_classes=n_classes,
+            dropout_prob=dropout,
+            block=block,
+            layers=layers,
+            groups=groups,
+            reduction=reduction,
+        )
     elif model_name == "ResNext50":
         model = monai.networks.nets.SEResNext50(
             spatial_dims=3,
@@ -200,11 +231,12 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
     #             param.requires_grad = True
     #         else:
     #             param.requires_grad = True
-    elif model_name == "ResNet10":
+    elif model_name in ["ResNet10", "ResNet50"]:
         if pretrained:
             model = ResNetWrapper(
                 model_name,
                 dropout_prob=dropout,
+                freeze=freeze,
                 spatial_dims=3,
                 n_input_channels=1,
                 num_classes=n_classes, 
@@ -232,7 +264,6 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
                 spatial_dims=3,
                 n_input_channels=1,
                 num_classes=n_classes)
-
     else:
         raise ValueError(f"The model name {model_name} is not accepted.")
     

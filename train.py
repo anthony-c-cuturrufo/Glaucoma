@@ -34,21 +34,22 @@ if __name__ == "__main__":
     parser.add_argument('--contrastive_loss', type=int, default=1, help='1 for contrastive loss, 0 for no contrastive loss.')
     parser.add_argument('--dropout', type=float, default=.2, help='Dropout rate for model')
     parser.add_argument('--contrastive_mode', type=str, default="None", help='Contrastive learning mode (e.g. augmentation or Macop')
-    parser.add_argument('--augment', type=bool, default=True, help='Apply data augmentation')
     parser.add_argument('--dataset', type=str, default="database11_Macular_SubMRN_v4.csv", help='Dataset filename')
     parser.add_argument('--image_size', type=lambda s: tuple(map(int, s.split(','))), default=(128,200,200), help='Image size as a tuple (e.g., 128,200,200)')
     parser.add_argument('--epochs', type=int, default=800, help='Number of epochs for training')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay')
-    parser.add_argument('--add_denoise', type=bool, default=False, help='Add denoised scans (only supported for contrastive_mode = None)')
+    parser.add_argument('--add_denoise', action='store_true', help='Add denoised scans (only supported for contrastive_mode = None)')
     parser.add_argument('--prob', type=float, default=.5, help='Probability of transformation (e.g .5)')
     parser.add_argument('--imbalance_factor', type=float, default=1.1, help='Multiplicative factor to increase number of glaucoma scans')
     parser.add_argument('--split', type=str, default="split1", help='Train val split (e.g. split1, split2, split3)')
     parser.add_argument('--conv_layers', type=lambda s: [int(item) for item in s.split(',')], default=[32,64], help='Conv layer config for 3DCNN (e.g., 32,64)')
-    parser.add_argument('--fc_layers', type=lambda s: [int(item) for item in s.split(',')], default=[16], help='Fc layer config for 3DCNN (e.g., 16)')
+    parser.add_argument('--fc_layers', type=lambda s: [int(item) for item in s.split(',')], default=[], help='Fc layer config for 3DCNN and ResNet(e.g., 16)')
     parser.add_argument('--warmup_epochs', type=int, default=-1, help='Number of warmup epochs')
     parser.add_argument('--cos_anneal', type=int, default=-1, help='T_max for cosine annealing lr (e.g 400)')
     parser.add_argument('--loss_f', type=str, default="CrossEntropy", help='Loss function (e.g., CrossEntropy, Focal, CrossEntropyW)')
+    parser.add_argument('--freeze', action='store_true', help='Freeze pretrained weights for ResNets')
+
 
 
 
@@ -62,7 +63,6 @@ if __name__ == "__main__":
     batch_size = args.batch_size
     dropout = args.dropout
     contrastive_mode = args.contrastive_mode
-    augment_data = args.augment
     dataset_name = args.dataset
     image_size = args.image_size
     use_contrastive_loss = args.contrastive_loss
@@ -78,6 +78,7 @@ if __name__ == "__main__":
     warmup_epochs = args.warmup_epochs
     cos_anneal = args.cos_anneal
     loss_f = args.loss_f
+    freeze = args.freeze
 
     num_gpus = dist.get_world_size()
     region = "Macular" if "Macular" in dataset_name else ("Macop" if "Macop" in dataset_name else "Optic")
@@ -114,7 +115,7 @@ if __name__ == "__main__":
     print("Size of Training Set: ", len(train_targets))
     print("Size of Validation Set: ", len(val_targets))
     #-------------------------------------------------    
-    model = model_factory(model_name, image_size, dropout, contrastive_mode=contrastive_mode,device=device, conv_layers=conv_layers, fc_layers=fc_layers).to(device)
+    model = model_factory(model_name, image_size, dropout, contrastive_mode=contrastive_mode,device=device, conv_layers=conv_layers, fc_layers=fc_layers, freeze=freeze).to(device)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
 
     # Synchronize all processes
@@ -124,8 +125,10 @@ if __name__ == "__main__":
     if loss_f == "Focal":
         loss_function = FocalLoss(alpha=0.25, gamma=2)
     elif loss_f == "CrossEntropyW":
-        assert split == "split1" and region == "Optic"
-        Class_0_train, Class_0_test, Class_1_train, Class_1_test = 614, 158, 993, 158
+        Class_0_train = len(df[(df[split] == "train") & (df.classification == 0)])
+        Class_1_train = len(df[(df[split] == "train") & (df.classification == 1)])
+        Class_0_test = len(df[(df[split] == "test") & (df.classification == 0)])
+        Class_1_test = len(df[(df[split] == "test") & (df.classification == 1)])
         weight_for_Class_0 = (Class_0_test / Class_0_train) * (Class_1_train / Class_1_test)
         weights = torch.tensor([weight_for_Class_0, 1.0], dtype=torch.float32).to(device)
         loss_function = torch.nn.CrossEntropyLoss(weight=weights)
@@ -233,7 +236,7 @@ if __name__ == "__main__":
                         val_outputs = model(val_images).to(device)
                     else:
                         val_images, val_aux, val_labels = val_data['data'].to(device), val_data['aux'].to(device), val_data['target'].to(device)
-                        val_outputs = model(val_images,val_aux)
+                        val_outputs = model(val_images,val_aux).to(device)
                    
                     preds = val_outputs.argmax(dim=1)
                     labels = val_labels.argmax(dim=1)
@@ -310,45 +313,6 @@ if __name__ == "__main__":
                 if val_metric > best_metric:
                     best_metric = val_metric
                     best_metric_epoch = epoch + 1
-                    # TESTING ------------------------------------------------------------------
-                    # model.eval()
-                    # with torch.no_grad():
-                    #     test_accuracy.reset()
-                    #     test_f1.reset()
-                    #     test_precision.reset()
-                    #     test_recall.reset()
-                    #     test_auroc.reset()
-                    #     test_confmat.reset()           
-                    #     for test_data in test_dataloader:
-                    #         if contrastive_mode == "None":
-                    #             test_images, test_labels = test_data['data'].to(device), test_data['target'].to(device)
-                    #             test_outputs = model(test_images).to(device)
-                
-                    #         test_preds = test_outputs.argmax(dim=1)
-                    #         test_labels = test_labels.argmax(dim=1)
-                    #         test_accuracy.update(test_preds, test_labels)
-                    #         test_f1.update(test_preds, test_labels)
-                    #         test_precision.update(test_preds, test_labels)
-                    #         test_recall.update(test_preds, test_labels)
-                    #         test_auroc.update(F.softmax(test_outputs, dim=1)[:, 1], test_labels)
-                    #         test_confmat.update(test_preds, test_labels)
-                    #     torch.distributed.barrier()
-                    #     test_acc      = test_accuracy.compute()
-                    #     test_f1_score = test_f1.compute()
-                    #     test_prec     = test_precision.compute()
-                    #     test_rec      = test_recall.compute()
-                    #     test_auc      = test_auroc.compute()
-                    #     test_cm       = test_confmat.compute()
-                    #     test_tn, test_fp, test_fn, test_tp = test_cm.view(-1).tolist()
-                    #     test_sensitivity = test_tp / (test_tp + test_fn) if (test_tp + test_fn) > 0 else 0
-                    #     test_specificity = test_tn / (test_tn + test_fp) if (test_tn + test_fp) > 0 else 0                            
-                    #     test_accuracy.reset()
-                    #     test_f1.reset()
-                    #     test_precision.reset()
-                    #     test_recall.reset()
-                    #     test_auroc.reset()
-                    #     test_confmat.reset()
-                    #---------------------------------------------------------------------------
                     if dist.get_rank() == 0:
                         torch.save({
                             'epoch': best_metric_epoch,

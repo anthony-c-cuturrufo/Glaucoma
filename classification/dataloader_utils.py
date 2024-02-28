@@ -166,9 +166,17 @@ def train_val_split(pos, neg, val_split=0.2):
 
 def split_and_process(df, image_size=(128, 200, 200), imbalance_factor=1.1, add_denoise=False, split_name="split1", region="Macular", split="train"):
     df_split = df[df[split_name] == split]
-
     N = min(len(df_split[df_split.classification == 0]), len(df_split[df_split.classification == 1])) 
     df_bal = pd.concat([df_split[df_split.classification == 0], df_split[df_split.classification == 1][:int(N * imbalance_factor)]]) if split=="train" else df_split
+
+    if region == "Macop":
+        scans_from_df = lambda fps: [process_scan(adjust_filepath(f), image_size=image_size) for f in tqdm(fps)]
+        op_data = np.expand_dims(np.array(scans_from_df(df_bal.filepaths.values)), axis=1)
+        mc_data = np.expand_dims(np.array(scans_from_df(df_bal.filepaths_mc.values)), axis=1)
+        labels = df_bal.classification.values
+        targets = np.vstack((1 - labels, labels)).T
+        return ((op_data, mc_data), targets, 0) if split == "train" else ((op_data, mc_data), targets)
+
 
     scans_from_df = lambda df: [process_scan(adjust_filepath(f), image_size=image_size) for f in tqdm(df.filepaths.values)]
     data = np.expand_dims(np.array(scans_from_df(df_bal)), axis=1)
