@@ -164,10 +164,10 @@ def train_val_split(pos, neg, val_split=0.2):
     return train_patient_ids, val_patient_ids
 
 
-def split_and_process(df, image_size=(128, 200, 200), imbalance_factor=1.1, add_denoise=False, split_name="split1", region="Macular", split="train"):
-    df_split = df[df[split_name] == split]
+def split_and_process(df, image_size=(128, 200, 200), imbalance_factor=1.1, add_denoise=False, split_name="split1", region="Macular", split="train"):        
+    df_split = df[df[split_name] == split] if split != "trainval" else df[df[split_name] != "test"]
     N = min(len(df_split[df_split.classification == 0]), len(df_split[df_split.classification == 1])) 
-    df_bal = pd.concat([df_split[df_split.classification == 0], df_split[df_split.classification == 1][:int(N * imbalance_factor)]]) if split=="train" else df_split
+    df_bal = pd.concat([df_split[df_split.classification == 0], df_split[df_split.classification == 1][:int(N * imbalance_factor)]]) if split in ["train", "trainval"] else df_split
 
     if region == "Macop":
         scans_from_df = lambda fps: [process_scan(adjust_filepath(f), image_size=image_size) for f in tqdm(fps)]
@@ -175,7 +175,7 @@ def split_and_process(df, image_size=(128, 200, 200), imbalance_factor=1.1, add_
         mc_data = np.expand_dims(np.array(scans_from_df(df_bal.filepaths_mc.values)), axis=1)
         labels = df_bal.classification.values
         targets = np.vstack((1 - labels, labels)).T
-        return ((op_data, mc_data), targets, 0) if split == "train" else ((op_data, mc_data), targets)
+        return ((op_data, mc_data), targets, 0) if split in ["train", "trainval"] else ((op_data, mc_data), targets)
 
 
     scans_from_df = lambda df: [process_scan(adjust_filepath(f), image_size=image_size) for f in tqdm(df.filepaths.values)]
@@ -231,7 +231,7 @@ def split_and_process(df, image_size=(128, 200, 200), imbalance_factor=1.1, add_
                     else:
                         targets = np.concatenate([targets, create_labels(denoised_data_transposed, [0, 1])])
                     num_denoised += len(denoised_data_transposed)
-    if split == "train": 
+    if split in ["train", "trainval"]: 
         return data, targets, num_denoised
     return data, targets
 

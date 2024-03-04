@@ -12,8 +12,8 @@ from monai.transforms import (
 )
 from torch.utils.data import DataLoader
 from classification.dataloader import ScanDataset
-from classification.model_factory import model_factory, ContrastiveLoss, FocalLoss
-from classification.dataloader_utils import process_scans, precompute_dataset, split_and_process
+from classification.model_factory import model_factory, FocalLoss
+from classification.dataloader_utils import split_and_process
 import argparse
 import pandas as pd
 
@@ -22,9 +22,7 @@ import torch.distributed as dist
 from torchmetrics import Accuracy, F1Score, Precision, Recall, AUROC, ConfusionMatrix
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
 
-
 dist.init_process_group(backend='nccl')
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train a model on OCTDataset')
@@ -50,15 +48,8 @@ if __name__ == "__main__":
     parser.add_argument('--loss_f', type=str, default="CrossEntropy", help='Loss function (e.g., CrossEntropy, Focal, CrossEntropyW)')
     parser.add_argument('--freeze', action='store_true', help='Freeze pretrained weights for ResNets')
 
-
-
-
     local_rank = int(os.environ['LOCAL_RANK'])
-
     args = parser.parse_args()
-    num_workers = 4
-    device = torch.device(f"cuda:{local_rank}")
-
     model_name = args.model_name
     batch_size = args.batch_size
     dropout = args.dropout
@@ -79,12 +70,11 @@ if __name__ == "__main__":
     cos_anneal = args.cos_anneal
     loss_f = args.loss_f
     freeze = args.freeze
-
+    num_workers = 4
+    device = torch.device(f"cuda:{local_rank}")
     num_gpus = dist.get_world_size()
     region = "Macular" if "Macular" in dataset_name else ("Macop" if "Macop" in dataset_name else "Optic")
-
     print(args)
-
 
     # Create Dataset
     #--------------------------------------------------------------------------------------------------
@@ -96,10 +86,8 @@ if __name__ == "__main__":
         RandAdjustContrast(prob=prob),
         RandAffine(prob=prob, translate_range=(15,10, 0), rotate_range=(0.02,0,0), scale_range=((-.1, .4), 0,0), padding_mode = "zeros"),
         ])
-
-    # train_data, val_data, train_targets, val_targets, num_denoised = process_scans(df, image_size=image_size, contrastive_mode=contrastive_mode,imbalance_factor=imbalance_factor, add_denoise=add_denoise, test=test, split=split, region=region)
-    train_data, train_targets, num_denoised = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=add_denoise, split_name=split, region=region, split="train")
-    val_data, val_targets = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=False, split_name=split, region=region, split="val")
+    train_data, train_targets, num_denoised = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=add_denoise, split_name=split, region=region, split="trainval")
+    val_data, val_targets = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=False, split_name=split, region=region, split="test")
     test_data, test_targets = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=False, split_name=split, region=region, split="test")
     print("Finished processing data")
     train_dataset = ScanDataset(train_data, train_targets, transforms, add_denoise=add_denoise, contrastive_mode=contrastive_mode, num_denoised=num_denoised)
