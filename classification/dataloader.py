@@ -32,7 +32,7 @@ class ScanDataset(Dataset):
                     "target": self.targets[index],
                 }
             return data_point 
-        elif self.contrastive_mode == "augmentation":
+        elif self.contrastive_mode == "Augmentation":
             data = self.data[index]
             aux  = self.data[index]
             if self.transform:
@@ -53,9 +53,11 @@ class ScanDataset(Dataset):
             data = self.data[0][index]
             aux  = self.data[1][index]
             if self.transform:
-                data = self.transform(data)
-                aux = self.transform(aux)
-            
+                if self.contrastive_mode == "Denoise":
+                    data = self.transform(data)
+                else:
+                    data = self.transform(data)
+                    aux = self.transform(aux)
             data_point = {
                 "data": data,
                 "aux" : aux,

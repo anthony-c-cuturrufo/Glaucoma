@@ -4,11 +4,13 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 from monai.transforms import (
-    Compose,  
+    Compose,
+    OneOf,  
     RandGaussianNoise,
     RandScaleIntensity,
     RandAdjustContrast,
     RandAffine,
+    Identity
 )
 from torch.utils.data import DataLoader
 from classification.dataloader import ScanDataset
@@ -31,13 +33,14 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=4, help='Batch size for training and validation')
     parser.add_argument('--contrastive_loss', type=int, default=1, help='1 for contrastive loss, 0 for no contrastive loss.')
     parser.add_argument('--dropout', type=float, default=.2, help='Dropout rate for model')
-    parser.add_argument('--contrastive_mode', type=str, default="None", help='Contrastive learning mode (e.g. augmentation or Macop')
+    parser.add_argument('--contrastive_mode', type=str, default="None", help='Contrastive learning mode (e.g. Augmentation, Macop, Denoise')
     parser.add_argument('--dataset', type=str, default="database11_Macular_SubMRN_v4.csv", help='Dataset filename')
     parser.add_argument('--image_size', type=lambda s: tuple(map(int, s.split(','))), default=(128,200,200), help='Image size as a tuple (e.g., 128,200,200)')
     parser.add_argument('--epochs', type=int, default=800, help='Number of epochs for training')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay')
     parser.add_argument('--add_denoise', action='store_true', help='Add denoised scans (only supported for contrastive_mode = None)')
+    parser.add_argument('--tv', action='store_true', help='Train on training and validation set, to be used after hyperparemter selection on validation set')
     parser.add_argument('--prob', type=float, default=.5, help='Probability of transformation (e.g .5)')
     parser.add_argument('--imbalance_factor', type=float, default=1.1, help='Multiplicative factor to increase number of glaucoma scans')
     parser.add_argument('--split', type=str, default="split1", help='Train val split (e.g. split1, split2, split3)')
@@ -71,6 +74,7 @@ if __name__ == "__main__":
     loss_f = args.loss_f
     freeze = args.freeze
     num_workers = 4
+    training_data = ["train"] if not args.tv else ["train", "val"]
     device = torch.device(f"cuda:{local_rank}")
     num_gpus = dist.get_world_size()
     region = "Macular" if "Macular" in dataset_name else ("Macop" if "Macop" in dataset_name else "Optic")
@@ -80,15 +84,18 @@ if __name__ == "__main__":
     #--------------------------------------------------------------------------------------------------
     print("Creating Dataset from " + dataset_name)
     df = pd.read_csv(dataset_name)
-    transforms = Compose([
+    transforms_list = Compose([
         RandGaussianNoise(prob=prob), 
         RandScaleIntensity(prob=prob, factors=(1,4)),
         RandAdjustContrast(prob=prob),
         RandAffine(prob=prob, translate_range=(15,10, 0), rotate_range=(0.02,0,0), scale_range=((-.1, .4), 0,0), padding_mode = "zeros"),
         ])
-    train_data, train_targets, num_denoised = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=add_denoise, split_name=split, region=region, split="trainval")
-    val_data, val_targets = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=False, split_name=split, region=region, split="test")
-    test_data, test_targets = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=False, split_name=split, region=region, split="test")
+    transforms = OneOf([transforms_list, Identity()], weights=[prob, 1 - prob])
+
+    
+    train_data, train_targets, num_denoised = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=add_denoise, split_name=split, region=region, split=training_data, contrastive_mode=contrastive_mode)
+    val_data, val_targets = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=False, split_name=split, region=region, split=["test"], contrastive_mode=contrastive_mode)
+    test_data, test_targets = split_and_process(df, image_size=image_size, imbalance_factor=imbalance_factor, add_denoise=False, split_name=split, region=region, split=["val"], contrastive_mode=contrastive_mode)
     print("Finished processing data")
     train_dataset = ScanDataset(train_data, train_targets, transforms, add_denoise=add_denoise, contrastive_mode=contrastive_mode, num_denoised=num_denoised)
     val_dataset = ScanDataset(val_data, val_targets, None, contrastive_mode=contrastive_mode)
@@ -113,8 +120,8 @@ if __name__ == "__main__":
     if loss_f == "Focal":
         loss_function = FocalLoss(alpha=0.25, gamma=2)
     elif loss_f == "CrossEntropyW":
-        Class_0_train = len(df[(df[split] == "train") & (df.classification == 0)])
-        Class_1_train = len(df[(df[split] == "train") & (df.classification == 1)])
+        Class_0_train = len(df[(df[split].isin(training_data)) & (df.classification == 0)])
+        Class_1_train = len(df[(df[split].isin(training_data)) & (df.classification == 1)])
         Class_0_test = len(df[(df[split] == "test") & (df.classification == 0)])
         Class_1_test = len(df[(df[split] == "test") & (df.classification == 1)])
         weight_for_Class_0 = (Class_0_test / Class_0_train) * (Class_1_train / Class_1_test)

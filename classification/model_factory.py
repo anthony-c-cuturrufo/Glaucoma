@@ -203,8 +203,7 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
             block=block,
             layers=layers,
             groups=groups,
-            reduction=reduction,
-        )
+            reduction=reduction)
     elif model_name == "ResNext50":
         model = monai.networks.nets.SEResNext50(
             spatial_dims=3,
