@@ -60,9 +60,6 @@ def resize_volume(img, image_size):
     depth_factor = 1 / depth
     width_factor = 1 / width
     height_factor = 1 / height
-    # Rotate
-#     img = ndimage.rotate(img, 90, reshape=False)
-    # Resize across z-axis
     img = ndimage.zoom(img, (width_factor, height_factor, depth_factor), order=1)
     return img 
 
@@ -76,8 +73,10 @@ def normalize(volume):
     volume = volume.astype("float32")
     return volume
 
-def process_scan(path, image_size):
+def process_scan(path, image_size, left):
     img = read_image(path)
+    if left:
+        img = np.fliplr(img)
     img = normalize(img)
     return resize_volume(img, image_size) 
 
@@ -87,7 +86,7 @@ def split_and_process(df, image_size=(128, 200, 200), imbalance_factor=1.1, add_
     df_bal = pd.concat([df_split[df_split.classification == 0], df_split[df_split.classification == 1][:int(N * imbalance_factor)]]) if "train" in split else df_split
     labels = df_bal.classification.values
     targets = np.vstack((1 - labels, labels)).T
-    scans_from_df = lambda fps: [process_scan(adjust_filepath(f), image_size=image_size) for f in tqdm(fps)]
+    scans_from_df = lambda fps: [process_scan(adjust_filepath(f), image_size=image_size, left = ("_OD_" in f)) for f in tqdm(fps)]
 
     if region == "Macop":
         op_data = np.expand_dims(np.array(scans_from_df(df_bal.filepaths.values)), axis=1)
