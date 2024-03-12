@@ -80,13 +80,13 @@ def process_scan(path, image_size, left):
     img = normalize(img)
     return resize_volume(img, image_size) 
 
-def split_and_process(df, image_size=(128, 200, 200), imbalance_factor=1.1, add_denoise=False, split_name="split1", region="Macular", split=["train"], contrastive_mode = "None"):        
+def split_and_process(df, image_size=(128, 200, 200), imbalance_factor=1.1, add_denoise=False, split_name="split1", region="Macular", split=["train"], contrastive_mode = "None", num_classes=2):        
     df_split = df[df[split_name].isin(split)] 
     N = min(len(df_split[df_split.classification == 0]), len(df_split[df_split.classification == 1])) 
     df_bal = pd.concat([df_split[df_split.classification == 0], df_split[df_split.classification == 1][:int(N * imbalance_factor)]]) if "train" in split else df_split
     labels = df_bal.classification.values
-    targets = np.vstack((1 - labels, labels)).T
-    scans_from_df = lambda fps: [process_scan(adjust_filepath(f), image_size=image_size, left = ("_OD_" in f)) for f in tqdm(fps)]
+    targets = np.vstack((1 - labels, labels)).T if num_classes == 2 else labels[:, np.newaxis]
+    scans_from_df = lambda fps: [process_scan(adjust_filepath(f), image_size=image_size, left = ("_OS_" in f)) for f in tqdm(fps)]
 
     if region == "Macop":
         op_data = np.expand_dims(np.array(scans_from_df(df_bal.filepaths.values)), axis=1)
@@ -96,7 +96,7 @@ def split_and_process(df, image_size=(128, 200, 200), imbalance_factor=1.1, add_
     data = np.expand_dims(np.array(scans_from_df(df_bal.filepaths.values)), axis=1)
     num_denoised = 0 
     if (add_denoise and "train" in split) or contrastive_mode == "Denoise":
-        assert image_size == (128,200,200)
+        # assert image_size == (128,200,200)
         print("Loading denoised images")
         base_path = os.path.join("/local2/acc/Glaucoma", "BM3D_data", region + ''.join(map(str, image_size)))
         denoised_images = np.array([np.load(os.path.join(base_path, fp.split("/")[-1][:-4] + ".npy")) for fp in df_bal['filepaths'].values])

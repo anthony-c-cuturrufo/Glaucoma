@@ -85,7 +85,7 @@ class ViTWrapper(nn.Module):
         return output
     
 class ResNetWrapper(nn.Module):
-    def __init__(self, name, dropout_prob=.2, freeze=False, fc_layers=[], *args, **kwargs):
+    def __init__(self, name, dropout_prob=.2, freeze=False, fc_layers=[], num_classes=2, *args, **kwargs):
         super(ResNetWrapper, self).__init__()
         if name == "ResNet10":
             self.resnet = monai.networks.nets.resnet10(*args, **kwargs)
@@ -108,7 +108,7 @@ class ResNetWrapper(nn.Module):
             self.fc_layers.add_module('relu', nn.ReLU())
             self.fc_layers.add_module('dropout', nn.Dropout(dropout_prob))
             in_features = out_features
-        self.fc_layers.add_module('fc_final', nn.Linear(in_features, 2))
+        self.fc_layers.add_module('fc_final', nn.Linear(in_features, num_classes))
 
     def forward(self, x):
         output = self.resnet(x)
@@ -184,15 +184,68 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
         model = ViTWrapper(
             in_channels=1, 
             img_size=image_size, 
-            patch_size = (16,16,16),
-            pos_embed='conv', 
+            patch_size = (18,18,18),
+            num_layers=8,
+            proj_type='conv', 
             classification=True, 
             post_activation = "None",
             dropout_rate = dropout,
             num_classes = n_classes)
+    elif model_name == "ResNext7":
+        block = SEResNeXtBottleneck 
+        layers = [1, 0, 0, 0] 
+        groups = 8 # Number of groups for ResNeXt, typical values are 32 or 64
+        reduction = 16 # Reduction ratio for SE module
+        model = SENet(
+            spatial_dims=3,
+            in_channels=1,
+            num_classes=n_classes,
+            dropout_prob=dropout,
+            block=block,
+            layers=layers,
+            groups=groups,
+            inplanes=64,
+            downsample_kernel_size=1,
+            input_3x3=False,
+            qkv_bias=True,
+            reduction=reduction)
+    elif model_name == "ResNext8":
+        block = SEResNeXtBottleneck 
+        layers = [1, 1, 0, 0] 
+        groups = 16 # Number of groups for ResNeXt, typical values are 32 or 64
+        reduction = 16 # Reduction ratio for SE module
+        model = SENet(
+            spatial_dims=3,
+            in_channels=1,
+            num_classes=n_classes,
+            dropout_prob=dropout,
+            block=block,
+            layers=layers,
+            groups=groups,
+            inplanes=64,
+            downsample_kernel_size=1,
+            input_3x3=False,
+            reduction=reduction)
+    elif model_name == "ResNext9":
+        block = SEResNeXtBottleneck 
+        layers = [1, 1, 1, 0] 
+        groups = 16 # Number of groups for ResNeXt, typical values are 32 or 64
+        reduction = 16 # Reduction ratio for SE module
+        model = SENet(
+            spatial_dims=3,
+            in_channels=1,
+            num_classes=n_classes,
+            dropout_prob=dropout,
+            block=block,
+            layers=layers,
+            groups=groups,
+            inplanes=64,
+            downsample_kernel_size=1,
+            input_3x3=False,
+            reduction=reduction)        
     elif model_name == "ResNext10":
-        block = SEResNeXtBottleneck # ResNeXt bottleneck block
-        layers = [1, 1, 1, 1] # Total 4 layers with 1 block each (to make it 10 layers, adjust these numbers)
+        block = SEResNeXtBottleneck 
+        layers = [1, 1, 1, 1] 
         groups = 32 # Number of groups for ResNeXt, typical values are 32 or 64
         reduction = 16 # Reduction ratio for SE module
         model = SENet(
@@ -203,6 +256,9 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
             block=block,
             layers=layers,
             groups=groups,
+            inplanes=64,
+            downsample_kernel_size=1,
+            input_3x3=False,
             reduction=reduction)
     elif model_name == "ResNext50":
         model = monai.networks.nets.SEResNext50(
@@ -236,9 +292,10 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
                 model_name,
                 dropout_prob=dropout,
                 freeze=freeze,
+                fc_layers=fc_layers,
+                num_classes=n_classes, 
                 spatial_dims=3,
                 n_input_channels=1,
-                num_classes=n_classes, 
                 pretrained=True,
                 feed_forward=False, 
                 shortcut_type="B",
