@@ -154,7 +154,7 @@ class MRNDataset(Dataset):
         use_denoised = self.denoised_data is not None and "train" in self.split and random.random() < 0.3 and self.contrastive_mode != "Denoise"
         scan = self.denoised_data[idx] if use_denoised else self.data[idx]
 
-        if self.transform and not use_denoised:
+        if self.transform and not use_denoised and "train" in self.split:
             scan = self.transform(scan)
 
         if self.contrastive_mode == "None":
@@ -207,7 +207,7 @@ class MacOpDataset(Dataset):
         macular_image = self.macular_data[macular_idx]
         optic_image = self.optic_data[optic_idx]
 
-        if self.transform:
+        if self.transform and "train" in self.split:
             macular_image = self.transform(macular_image)
             optic_image = self.transform(optic_image)
 
