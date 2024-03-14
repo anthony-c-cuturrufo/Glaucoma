@@ -5,32 +5,7 @@ import torch.nn.functional as F
 
 from monai.networks.nets import SENet
 from monai.networks.blocks.squeeze_and_excitation import SEResNeXtBottleneck
-
-# from classification.models import * 
-
-# class MedicalNet(nn.Module):
-
-#   def __init__(self, path_to_weights, device, dropout_prob):
-#     super(MedicalNet, self).__init__()
-#     self.model = resnet200(sample_input_D=1024, sample_input_H=200, sample_input_W=200, num_seg_classes=2)
-#     self.model.conv_seg = nn.Sequential(
-#         nn.AdaptiveMaxPool3d(output_size=(1, 1, 1)),
-#         nn.Flatten(start_dim=1),
-#         nn.Dropout(dropout_prob)
-#     )
-    # net_dict = self.model.state_dict()
-    # pretrained_weights = torch.load(path_to_weights, map_location=torch.device("cuda:0"))
-    # pretrain_dict = {
-    #     k.replace("module.", ""): v for k, v in pretrained_weights['state_dict'].items() if k.replace("module.", "") in net_dict.keys()
-    #   }
-    # net_dict.update(pretrain_dict)
-    # self.model.load_state_dict(net_dict)
-    # self.fc = nn.Sequential(nn.Linear(2048, 512), nn.ReLU(), nn.Linear(512, 2))
-    # self.fc = nn.Linear(2048, 2)
-
-#   def forward(self, x):
-#     features = self.model(x)
-#     return self.fc(features)
+from classification.nilay_model import dual_paths
 
     
 class Efficient3DCNN(nn.Module):
@@ -176,7 +151,7 @@ class FocalLoss(nn.Module):
         else:
             return F_loss
 
-def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 128, device="cuda", conv_layers = [32,64], fc_layers = [16], pretrained=True, freeze=False, path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
+def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 128, device="cuda", conv_layers = [32,64], fc_layers = [16], pretrained=True, freeze=False, use_dual_paths=False, path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
     n_classes = contrastive_layer_size if contrastive_mode != "None" else num_classes
     if model_name == "3DCNN":
         model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
@@ -207,7 +182,6 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
             inplanes=64,
             downsample_kernel_size=1,
             input_3x3=False,
-            qkv_bias=True,
             reduction=reduction)
     elif model_name == "ResNext8":
         block = SEResNeXtBottleneck 
@@ -325,6 +299,8 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
     
 
     if contrastive_mode != "None":
+        if use_dual_paths:
+            return dual_paths(model, num_classes, dropout)
         return ContrastiveWrapper(model, contrastive_layer_size, num_classes, dropout_rate=dropout)
     else:
         return model 
