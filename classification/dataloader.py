@@ -68,11 +68,16 @@ import random
 #             return data_point
 
 class ScanDataset(Dataset):
-    def __init__(self, fp, split_name, split, transform, image_size, add_denoise, contrastive_mode):
+    def __init__(self, fp, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor):
         self.split = split
         self.region = "Macular" if "Macular" in fp else "Optic"
         temp = pd.read_csv(fp)
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
+
+        if imbalance_factor != -1 and "train" in split:
+            N = min(len(self.df[self.df.classification == 0]), len(self.df[self.df.classification == 1])) 
+            self.df = pd.concat([self.df[self.df.classification == 0], self.df[self.df.classification == 1][:int(N * imbalance_factor)]]).reset_index(drop=True) 
+       
         self.data = self.get_data(image_size)
         if add_denoise or contrastive_mode == "Denoise":
             self.denoised_data = self.get_denoised(self.region, image_size)
@@ -89,7 +94,7 @@ class ScanDataset(Dataset):
     
     def get_denoised(self, region, image_size):
         base_path = os.path.join("/local2/acc/Glaucoma", "BM3D_data", region + ''.join(map(str, image_size)))
-        denoised_images = np.array([np.load(os.path.join(base_path, fp.split("/")[-1][:-4] + ".npy")) for fp in self.df['filepaths'].values])
+        denoised_images = np.array([np.load(os.path.join(base_path, os.path.basename(fp)[:-4] + ".npy")) for fp in self.df.filepaths.values])
         denoised_images = torch.tensor(np.expand_dims(denoised_images, axis=1), dtype=torch.float32)
         return denoised_images
 
@@ -138,7 +143,7 @@ class MRNDataset(Dataset):
     
     def get_denoised(self, region, image_size):
         base_path = os.path.join("/local2/acc/Glaucoma", "BM3D_data", region + ''.join(map(str, image_size)))
-        denoised_images = np.array([np.load(os.path.join(base_path, fp.split("/")[-1][:-4] + ".npy")) for fp in self.df['filepaths'].values])
+        denoised_images = np.array([np.load(os.path.join(base_path, os.path.basename(fp)[:-4] + ".npy")) for fp in self.df.filepaths.values])
         denoised_images = torch.tensor(np.expand_dims(denoised_images, axis=1), dtype=torch.float32)
         return denoised_images
 

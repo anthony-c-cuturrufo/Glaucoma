@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from monai.networks.nets import SENet
 from monai.networks.blocks.squeeze_and_excitation import SEResNeXtBottleneck
 from classification.nilay_model import dual_paths
+from classification.dual_vit import DualViT
 
     
 class Efficient3DCNN(nn.Module):
@@ -152,7 +153,7 @@ class FocalLoss(nn.Module):
             return F_loss
 
 def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 128, device="cuda", conv_layers = [32,64], fc_layers = [16], pretrained=True, freeze=False, use_dual_paths=False, path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
-    n_classes = contrastive_layer_size if contrastive_mode != "None" else num_classes
+    n_classes = contrastive_layer_size if contrastive_mode != "None" and model_name != "DualViT" else num_classes
     if model_name == "3DCNN":
         model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
     elif model_name == "ViT":
@@ -294,11 +295,28 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
                 spatial_dims=3,
                 n_input_channels=1,
                 num_classes=n_classes)
+    elif model_name == "DualViT":
+        assert contrastive_mode != "None"
+        model = DualViT(
+            in_channels_1 = 1, 
+            img_size_1 = image_size,
+            patch_size_1 = (18,18,18),
+            in_channels_2 = 1,
+            img_size_2 = image_size,
+            patch_size_2 = (18,18,18),
+            num_layers=8,
+            proj_type='conv', 
+            classification=True, 
+            post_activation = "None",
+            dropout_rate = dropout,
+            num_classes = n_classes,
+            hidden_size = 768
+        )
     else:
         raise ValueError(f"The model name {model_name} is not accepted.")
     
 
-    if contrastive_mode != "None":
+    if contrastive_mode != "None" and model_name != "DualViT":
         if use_dual_paths:
             return dual_paths(model, num_classes, dropout)
         return ContrastiveWrapper(model, contrastive_layer_size, num_classes, dropout_rate=dropout)
