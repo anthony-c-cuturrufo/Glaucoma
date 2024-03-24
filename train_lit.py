@@ -38,9 +38,10 @@ class CustomLightningCLI(LightningCLI):
     def before_instantiate_classes(self):
         model_config = self.config.fit.model
         data_config = self.config.fit.data
+        trainer_config = self.config.fit.trainer
         current_time = datetime.now().strftime("%Y%m%d_%H%M")
         image_size = '_'.join(map(str, model_config.image_size))
-        custom_name = f"{model_config.model_name}d{model_config.dropout}b{data_config.batch_size}lr{model_config.lr}img{image_size}_{current_time}{model_config.contrastive_mode}{data_config.dataset_name}"
+        custom_name = f"{model_config.model_name}d{model_config.dropout}b{data_config.batch_size}lr{model_config.lr}img{image_size}_{current_time}{model_config.contrastive_mode}{data_config.dataset_name}b_acc{trainer_config.accumulate_grad_batches}"
         self.config.fit.trainer.logger.init_args.name = custom_name
         super().before_instantiate_classes()
 
@@ -54,6 +55,12 @@ class GlaucomaModel(L.LightningModule):
             contrastive_mode="None", 
             conv_layers=[32,64], 
             fc_layers=[32], 
+            patch_s=18, 
+            hidden_s=768,
+            mlp_d=3072,
+            num_l=12,
+            num_h=12,
+            qkv=False,
             freeze=False, 
             lr=5e-5, 
             weight_decay=1e-2, 
@@ -64,7 +71,23 @@ class GlaucomaModel(L.LightningModule):
         
         super().__init__()
         self.save_hyperparameters()
-        self.model = model_factory(model_name, image_size, dropout=dropout, num_classes=num_classes, contrastive_mode=contrastive_mode, conv_layers=conv_layers, fc_layers=fc_layers, freeze=freeze, use_dual_paths=use_dual_paths)
+        self.model = model_factory(
+                        model_name, 
+                        image_size, 
+                        dropout=dropout, 
+                        num_classes=num_classes, 
+                        contrastive_mode=contrastive_mode, 
+                        conv_layers=conv_layers, 
+                        fc_layers=fc_layers, 
+                        freeze=freeze, 
+                        use_dual_paths=use_dual_paths,
+                        patch_s=patch_s, 
+                        hidden_s=hidden_s,
+                        mlp_d=mlp_d,
+                        num_l=num_l,
+                        num_h=num_h,
+                        qkv=qkv        
+                    )
         self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
 
         self.train_acc = Accuracy(task="binary")
@@ -74,8 +97,6 @@ class GlaucomaModel(L.LightningModule):
         self.spec = Specificity(task="binary")        
         self.sens = Recall(task="binary")
         self.conf = ConfusionMatrix(task="binary")
-
-
 
     def forward(self, x, aux=None):
         if self.hparams.contrastive_mode=="None":
@@ -92,12 +113,10 @@ class GlaucomaModel(L.LightningModule):
             logits = self(x, aux)
         
         loss = self.loss_fn(logits, y)
-        # acc = accuracy((logits > 0.5), y, task='binary')
         self.train_acc((logits > 0.5), y)
 
-        self.log('train_loss', loss)
+        self.log('train_loss', loss, sync_dist=True)
         self.log("train_acc", self.train_acc, on_epoch=True, on_step=False)
-
         return loss
     
     def evaluate(self, batch, stage=None):
@@ -136,8 +155,9 @@ class GlaucomaModel(L.LightningModule):
         df_cm = pd.DataFrame(cm.cpu().numpy() , index = [0,1], columns = [0,1])
         f, ax = plt.subplots(figsize = (20,15)) 
         sn.heatmap(df_cm, annot=True, ax=ax)
-        wandb.log({"plot": wandb.Image(f) })
+        # wandb.log({"plot": wandb.Image(f) })
         self.conf.reset() 
+        plt.close(f)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
@@ -180,8 +200,8 @@ class OCTDataModule(L.LightningDataModule):
 
         if stage == "fit":
             if self.hparams.dataset_name == "Macop":
-                self.train_dataset = MacOpDataset("Macular13.csv", "Optic13.csv", self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise)
-                self.val_dataset = MacOpDataset("Macular13.csv", "Optic13.csv", self.hparams.split_name, ["test"], transforms, self.hparams.image_size, self.hparams.add_denoise)
+                self.train_dataset = MacOpDataset("Macular14.csv", "Optic14.csv", self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise)
+                self.val_dataset = MacOpDataset("Macular14.csv", "Optic14.csv", self.hparams.split_name, ["test"], transforms, self.hparams.image_size, self.hparams.add_denoise)
             else:
                 if self.hparams.mrn_mode:
                     self.train_dataset = MRNDataset(self.hparams.dataset_name, self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode)

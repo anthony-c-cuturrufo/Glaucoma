@@ -152,7 +152,27 @@ class FocalLoss(nn.Module):
         else:
             return F_loss
 
-def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive_mode = "None", contrastive_layer_size = 128, device="cuda", conv_layers = [32,64], fc_layers = [16], pretrained=True, freeze=False, use_dual_paths=False, path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth"):
+def model_factory(
+    model_name, 
+    image_size,
+    dropout=.2, 
+    num_classes=2, 
+    contrastive_mode = "None", 
+    contrastive_layer_size = 128,
+    device="cuda", 
+    conv_layers = [32,64], 
+    fc_layers = [16], 
+    pretrained=True, 
+    freeze=False, 
+    use_dual_paths=False, 
+    path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth",
+    patch_s=18, 
+    hidden_s=768,
+    mlp_d=3072,
+    num_l=12,
+    num_h=12,
+    qkv=False,
+):
     n_classes = contrastive_layer_size if contrastive_mode != "None" and model_name != "DualViT" else num_classes
     if model_name == "3DCNN":
         model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
@@ -160,13 +180,17 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
         model = ViTWrapper(
             in_channels=1, 
             img_size=image_size, 
-            patch_size = (18,18,18),
-            num_layers=8,
+            patch_size = (patch_s,patch_s,patch_s),
+            hidden_size = hidden_s,
+            mlp_dim = mlp_d,
+            num_layers = num_l,
+            num_heads = num_h,
             proj_type='conv', 
             classification=True, 
             post_activation = "None",
             dropout_rate = dropout,
-            num_classes = n_classes)
+            num_classes = n_classes,
+            qkv_bias = qkv)
     elif model_name == "ResNext7":
         block = SEResNeXtBottleneck 
         layers = [1, 0, 0, 0] 
@@ -300,17 +324,20 @@ def model_factory(model_name, image_size, dropout=.2, num_classes=2, contrastive
         model = DualViT(
             in_channels_1 = 1, 
             img_size_1 = image_size,
-            patch_size_1 = (18,18,18),
+            patch_size_1 = (patch_s,patch_s,patch_s),
             in_channels_2 = 1,
             img_size_2 = image_size,
-            patch_size_2 = (18,18,18),
-            num_layers=8,
+            patch_size_2 = (patch_s,patch_s,patch_s),
+            hidden_size = hidden_s,
+            mlp_dim = mlp_d,
+            num_layers = num_l,
+            num_heads = num_h,
             proj_type='conv', 
             classification=True, 
             post_activation = "None",
             dropout_rate = dropout,
             num_classes = n_classes,
-            hidden_size = 768
+            qkv_bias = qkv
         )
     else:
         raise ValueError(f"The model name {model_name} is not accepted.")
