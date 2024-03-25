@@ -5,3 +5,7 @@ __pycache__/
 *.pth
 
 *.log
+
+*.yaml
+
+*.ckpt

@@ -277,14 +277,6 @@ def model_factory(
             in_channels=1,
             num_classes=n_classes,
             dropout_prob=dropout)
-    # elif model_name == "MedicalNet":
-    #     model = MedicalNet(path_to_weights=path_to_weights, device=device,dropout_prob=dropout)
-    #     for param_name, param in model.named_parameters():
-    #         print(param_name)
-    #         if param_name.startswith("fc"):
-    #             param.requires_grad = True
-    #         else:
-    #             param.requires_grad = True
     elif model_name in ["ResNet10", "ResNet50"]:
         if pretrained:
             model = ResNetWrapper(

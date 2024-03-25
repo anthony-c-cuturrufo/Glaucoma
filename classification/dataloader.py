@@ -63,11 +63,24 @@ class ScanDataset(Dataset):
         return data_point
         
 class MRNDataset(Dataset):
-    def __init__(self, fp, split_name, split, transform, image_size, add_denoise, contrastive_mode):
+    def __init__(self, fp, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor):
         self.split = split
         self.region = "Macular" if "Macular" in fp else "Optic"
         temp = pd.read_csv(fp)
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
+
+        if imbalance_factor != -1 and "train" in split:
+            unique_mrn_0 = self.df[self.df.classification == 0]['MRN'].unique()
+            unique_mrn_1 = self.df[self.df.classification == 1]['MRN'].unique()
+            N = min(len(unique_mrn_0), len(unique_mrn_1))
+            sampled_mrn_0 = np.random.choice(unique_mrn_0, N, replace=False)
+            sampled_mrn_1 = np.random.choice(unique_mrn_1, N, replace=False)
+            balanced_df = pd.concat([
+                self.df[self.df['MRN'].isin(sampled_mrn_0)],
+                self.df[self.df['MRN'].isin(sampled_mrn_1)]
+            ]).reset_index(drop=True) 
+            self.df = balanced_df
+
         self.data = self.get_data(image_size)
         if add_denoise or contrastive_mode == "Denoise":
             self.denoised_data = self.get_denoised(self.region, image_size)

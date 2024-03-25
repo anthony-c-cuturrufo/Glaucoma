@@ -204,7 +204,7 @@ class OCTDataModule(L.LightningDataModule):
                 self.val_dataset = MacOpDataset("Macular14.csv", "Optic14.csv", self.hparams.split_name, ["test"], transforms, self.hparams.image_size, self.hparams.add_denoise)
             else:
                 if self.hparams.mrn_mode:
-                    self.train_dataset = MRNDataset(self.hparams.dataset_name, self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode)
+                    self.train_dataset = MRNDataset(self.hparams.dataset_name, self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode, self.hparams.imbalance_factor)
                 else:
                     self.train_dataset = ScanDataset(self.hparams.dataset_name, self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode, self.hparams.imbalance_factor)
                 self.val_dataset = ScanDataset(self.hparams.dataset_name, self.hparams.split_name, ["test"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode, self.hparams.imbalance_factor)
