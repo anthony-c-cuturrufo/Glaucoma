@@ -91,12 +91,18 @@ class GlaucomaModel(L.LightningModule):
         self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
 
         self.train_acc = Accuracy(task="binary")
-        self.acc = Accuracy(task="binary")
-        self.f1 = F1Score(task="binary")
-        self.auroc = AUROC(task="binary")
-        self.spec = Specificity(task="binary")        
-        self.sens = Recall(task="binary")
-        self.conf = ConfusionMatrix(task="binary")
+        self.val_acc = Accuracy(task="binary")
+        self.val_f1 = F1Score(task="binary")
+        self.val_auroc = AUROC(task="binary")
+        self.val_spec = Specificity(task="binary")        
+        self.val_sens = Recall(task="binary")
+        self.val_conf = ConfusionMatrix(task="binary")
+        self.test_acc = Accuracy(task="binary")
+        self.test_f1 = F1Score(task="binary")
+        self.test_auroc = AUROC(task="binary")
+        self.test_spec = Specificity(task="binary")        
+        self.test_sens = Recall(task="binary")
+        self.test_conf = ConfusionMatrix(task="binary")
 
     def forward(self, x, aux=None):
         if self.hparams.contrastive_mode=="None":
@@ -118,8 +124,8 @@ class GlaucomaModel(L.LightningModule):
         self.log('train_loss', loss, sync_dist=True)
         self.log("train_acc", self.train_acc, on_epoch=True, on_step=False)
         return loss
-    
-    def evaluate(self, batch, stage=None):
+
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
         if self.hparams.contrastive_mode == "None":
             x, y = batch['data'], batch['target']
             logits = self(x)
@@ -127,36 +133,66 @@ class GlaucomaModel(L.LightningModule):
             x, aux, y = batch['data'], batch['aux'], batch['target']
             logits = self(x, aux)
         preds = (logits > 0.5)
-
-        self.acc(preds, y)
-        self.f1(preds, y)
-        self.spec(preds, y)
-        self.sens(preds, y)
-        self.auroc(logits, y)
-        self.conf.update(preds, y)
         loss = self.loss_fn(logits, y)
 
-        if stage:
-            self.log(f"{stage}_loss", loss, on_epoch=True, on_step=False)
-            self.log(f"{stage}_acc", self.acc,   on_epoch=True, on_step=False)
-            self.log(f"{stage}_f1", self.f1,     on_epoch=True, on_step=False)
-            self.log(f"{stage}_sens", self.sens, on_epoch=True, on_step=False)
-            self.log(f"{stage}_spec", self.spec, on_epoch=True, on_step=False)
-            self.log(f"{stage}_auc", self.auroc, on_epoch=True, on_step=False)
-
-    def validation_step(self, batch, batch_idx):
-        self.evaluate(batch, "val")
+        if dataloader_idx == 0:
+            self.val_acc(preds, y)
+            self.val_f1(preds, y)
+            self.val_spec(preds, y)
+            self.val_sens(preds, y)
+            self.val_auroc(logits, y)
+            self.val_conf.update(preds, y)
+            self.log("val_loss", loss, on_epoch=True, on_step=False)
+            self.log("val_acc", self.val_acc,  on_epoch=True, on_step=False, add_dataloader_idx=False)
+            self.log("val_f1",  self.val_f1,   on_epoch=True, on_step=False, add_dataloader_idx=False)
+            self.log("val_sens",self.val_sens, on_epoch=True, on_step=False, add_dataloader_idx=False)
+            self.log("val_spec",self.val_spec, on_epoch=True, on_step=False, add_dataloader_idx=False)
+            self.log("val_auc", self.val_auroc,on_epoch=True, on_step=False, add_dataloader_idx=False)
+        else:
+            self.test_acc(preds, y)
+            self.test_f1(preds, y)
+            self.test_spec(preds, y)
+            self.test_sens(preds, y)
+            self.test_auroc(logits, y)
+            self.test_conf.update(preds, y)
+            self.log("test_loss", loss, on_epoch=True, on_step=False)
+            self.log("test_acc", self.test_acc,  on_epoch=True, on_step=False, add_dataloader_idx=False)
+            self.log("test_f1",  self.test_f1,   on_epoch=True, on_step=False, add_dataloader_idx=False)
+            self.log("test_sens",self.test_sens, on_epoch=True, on_step=False, add_dataloader_idx=False)
+            self.log("test_spec",self.test_spec, on_epoch=True, on_step=False, add_dataloader_idx=False)
+            self.log("test_auc", self.test_auroc,on_epoch=True, on_step=False, add_dataloader_idx=False)
 
     def test_step(self, batch, batch_idx):
-        self.evaluate(batch, "test")
+        if self.hparams.contrastive_mode == "None":
+            x, y = batch['data'], batch['target']
+            logits = self(x)
+        else:
+            x, aux, y = batch['data'], batch['aux'], batch['target']
+            logits = self(x, aux)
+        preds = (logits > 0.5)
+        self.test_acc(preds, y)
+        self.test_f1(preds, y)
+        self.test_spec(preds, y)
+        self.test_sens(preds, y)
+        self.test_auroc(logits, y)
+        self.test_conf.update(preds, y)
+        loss = self.loss_fn(logits, y)
+
+        stage = "test"
+        self.log(f"{stage}_loss", loss, on_epoch=True, on_step=False)
+        self.log(f"{stage}_acc", self.test_acc,   on_epoch=True, on_step=False)
+        self.log(f"{stage}_f1",  self.test_f1,     on_epoch=True, on_step=False)
+        self.log(f"{stage}_sens",self.test_sens, on_epoch=True, on_step=False)
+        self.log(f"{stage}_spec",self.test_spec, on_epoch=True, on_step=False)
+        self.log(f"{stage}_auc", self.test_auroc, on_epoch=True, on_step=False)
 
     def on_validation_epoch_end(self):
-        cm = self.conf.compute()
-        df_cm = pd.DataFrame(cm.cpu().numpy() , index = [0,1], columns = [0,1])
+        cm = self.val_conf.compute()
+        df_cm = pd.DataFrame(cm.cpu().numpy(), index = [0,1], columns = [0,1])
         f, ax = plt.subplots(figsize = (20,15)) 
         sn.heatmap(df_cm, annot=True, ax=ax)
-        # wandb.log({"plot": wandb.Image(f) })
-        self.conf.reset() 
+        wandb.log({"plot": wandb.Image(f) })
+        self.val_conf.reset() 
         plt.close(f)
 
     def configure_optimizers(self):
@@ -210,21 +246,21 @@ class OCTDataModule(L.LightningDataModule):
                 self.val_dataset = ScanDataset(self.hparams.dataset_name, self.hparams.split_name, ["test"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode, self.hparams.imbalance_factor)
             
         
-        if stage == "test":
+        if stage == "test" or not self.hparams.tv:
             if self.hparams.dataset_name == "Macop":
-                self.test_dataset = MacOpDataset("Macular13.csv", "Optic13.csv", self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode)
+                self.test_dataset = MacOpDataset("Macular14.csv", "Optic14.csv", self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode)
             else:
-                if self.hparams.mrn_mode:
-                    self.test_dataset = ScanDataset(self.hparams.dataset_name, self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode)
-                else:
-                    self.test_dataset = MRNDataset(self.hparams.dataset_name, self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode)
-        print("Finished processing data") 
+                self.test_dataset = ScanDataset(self.hparams.dataset_name, self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode, self.hparams.imbalance_factor)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=True)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=False)
+        if not self.hparams.tv:
+            return [DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=False), 
+                DataLoader(self.test_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=False)]
+        else:
+            return DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=False)
 
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=False)
