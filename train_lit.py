@@ -19,7 +19,6 @@ import pandas as pd
 
 from torchmetrics.classification import Accuracy, F1Score, AUROC, Specificity, Recall, ConfusionMatrix
 import wandb
-# from torchmetrics.functional.classification import binary_specificity_at_sensitivity
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, StepLR
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -36,6 +35,7 @@ import finetuning_scheduler as fts
 
 class CustomLightningCLI(LightningCLI):
     def before_instantiate_classes(self):
+        torch.set_float32_matmul_precision('medium')
         model_config = self.config.fit.model
         data_config = self.config.fit.data
         trainer_config = self.config.fit.trainer
@@ -208,7 +208,7 @@ class GlaucomaModel(L.LightningModule):
 class OCTDataModule(L.LightningDataModule):
     def __init__(
         self, 
-        dataset_name="Optic14.csv", 
+        dataset_name="Optic15.csv", 
         batch_size=8, 
         num_workers=4, 
         image_size=(128,200,200), 
@@ -236,8 +236,8 @@ class OCTDataModule(L.LightningDataModule):
 
         if stage == "fit":
             if self.hparams.dataset_name == "Macop":
-                self.train_dataset = MacOpDataset("Macular14.csv", "Optic14.csv", self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise)
-                self.val_dataset = MacOpDataset("Macular14.csv", "Optic14.csv", self.hparams.split_name, ["test"], transforms, self.hparams.image_size, self.hparams.add_denoise)
+                self.train_dataset = MacOpDataset("Macular15.csv", "Optic15.csv", self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise)
+                self.val_dataset = MacOpDataset("Macular15.csv", "Optic15.csv", self.hparams.split_name, ["test"], transforms, self.hparams.image_size, self.hparams.add_denoise)
             else:
                 if self.hparams.mrn_mode:
                     self.train_dataset = MRNDataset(self.hparams.dataset_name, self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode, self.hparams.imbalance_factor)
@@ -248,7 +248,7 @@ class OCTDataModule(L.LightningDataModule):
         
         if stage == "test" or not self.hparams.tv:
             if self.hparams.dataset_name == "Macop":
-                self.test_dataset = MacOpDataset("Macular14.csv", "Optic14.csv", self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode)
+                self.test_dataset = MacOpDataset("Macular15.csv", "Optic15.csv", self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode)
             else:
                 self.test_dataset = ScanDataset(self.hparams.dataset_name, self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode, self.hparams.imbalance_factor)
 
