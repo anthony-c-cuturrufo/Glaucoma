@@ -11,6 +11,10 @@ class ScanDataset(Dataset):
     def __init__(self, fp, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor):
         self.split = split
         self.region = "Macular" if "Macular" in fp else "Optic"
+
+        if "train" not in split and "15" in fp:
+            fp = self.region + "15_og.csv"
+            
         temp = pd.read_csv(fp)
         temp = temp.sample(frac=1).reset_index(drop=True) if "train" not in split else temp
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
@@ -137,6 +141,12 @@ class MRNDataset(Dataset):
         
 class MacOpDataset(Dataset):
     def __init__(self, mc_fp, op_fp, split_name, split, transform, image_size, add_denoise=False):
+        self.split = split
+
+        if "train" not in split and "15" in mc_fp:
+            mc_fp = "Macular15_og.csv"
+            op_fp = "Optic15_og.csv"
+
         mac_df = pd.read_csv(mc_fp)
         self.macular_df = mac_df[mac_df[split_name].isin(split)].reset_index(drop=True)
         self.macular_data = self.get_data(self.macular_df, image_size)
