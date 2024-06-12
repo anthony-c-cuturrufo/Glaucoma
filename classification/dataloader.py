@@ -140,8 +140,9 @@ class MRNDataset(Dataset):
 
         
 class MacOpDataset(Dataset):
-    def __init__(self, mc_fp, op_fp, split_name, split, transform, image_size, add_denoise=False):
+    def __init__(self, mc_fp, op_fp, split_name, split, transform, image_size, add_denoise):
         self.split = split
+        self.add_denoise = add_denoise
 
         if "train" not in split and "15" in mc_fp:
             mc_fp = "Macular15_og.csv"
@@ -155,6 +156,13 @@ class MacOpDataset(Dataset):
         self.optic_df = op_df[op_df[split_name].isin(split)].reset_index(drop=True)
         self.optic_data = self.get_data(self.optic_df, image_size)
 
+        if self.add_denoise:
+            self.denoised_mc = self.get_denoised(self.macular_df, "Macular", image_size)
+            self.denoised_op = self.get_denoised(self.optic_df, "Optic", image_size)
+        else:
+            self.denoised_mc = None
+            self.denoised_op = None
+
         self.mrn_classification_pairs = self.find_matching_pairs()
         self.transform = transform 
 
@@ -165,6 +173,12 @@ class MacOpDataset(Dataset):
     def find_matching_pairs(self):
         merged_df = pd.merge(self.macular_df, self.optic_df, on=['MRN', 'classification'])
         return list(zip(merged_df['MRN'], merged_df['classification']))
+    
+    def get_denoised(self, df, region, image_size):
+        base_path = os.path.join("/local2/acc/Glaucoma", "BM3D_data", region + ''.join(map(str, image_size)))
+        denoised_images = np.array([np.load(os.path.join(base_path, os.path.basename(fp)[:-4] + ".npy")) for fp in df.filepaths.values])
+        denoised_images = torch.tensor(np.expand_dims(denoised_images, axis=1), dtype=torch.float32)
+        return denoised_images
 
     def __len__(self):
         return len(self.mrn_classification_pairs)
@@ -173,10 +187,11 @@ class MacOpDataset(Dataset):
         mrn, classification = self.mrn_classification_pairs[index]
 
         macular_idx, optic_idx = self.random_select_indices(mrn, classification)
-        macular_image = self.macular_data[macular_idx]
-        optic_image = self.optic_data[optic_idx]
+        use_denoised = self.add_denoise and "train" in self.split and random.random() < 0.3 
+        macular_image = self.denoised_mc[macular_idx] if use_denoised else self.macular_data[macular_idx]
+        optic_image = self.denoised_op[optic_idx] if use_denoised else self.optic_data[optic_idx]
 
-        if self.transform and "train" in self.split:
+        if self.transform and not use_denoised and "train" in self.split:
             macular_image = self.transform(macular_image)
             optic_image = self.transform(optic_image)
 
@@ -195,4 +210,77 @@ class MacOpDataset(Dataset):
         macular_idx = random.choice(macular_indices)
         optic_idx = random.choice(optic_indices) 
         return macular_idx, optic_idx
+    
+
+class HiroshiDataset(Dataset):
+    def __init__(self, split_name, split, transform, add_denoise, contrastive_mode, imbalance_factor):
+        self.split = split
+        temp = pd.read_csv('/home/acc/Glaucoma/Glaucoma/hiroshi_dataset_splits.csv')
+        self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
+
+        if imbalance_factor != -1 and "train" in split:
+            unique_mrn_0 = self.df[self.df.classification == 0]['MRN'].unique()
+            unique_mrn_1 = self.df[self.df.classification == 1]['MRN'].unique()
+            N = min(len(unique_mrn_0), len(unique_mrn_1))
+            sampled_mrn_0 = np.random.choice(unique_mrn_0, N, replace=False)
+            sampled_mrn_1 = np.random.choice(unique_mrn_1, N, replace=False)
+            balanced_df = pd.concat([
+                self.df[self.df['MRN'].isin(sampled_mrn_0)],
+                self.df[self.df['MRN'].isin(sampled_mrn_1)]
+            ]).reset_index(drop=True) 
+            self.df = balanced_df
+
+        
+        self.data = self.get_data()
+        if add_denoise or contrastive_mode == "Denoise":
+            self.denoised_data = self.get_denoised()
+        else:
+            self.denoised_data = None
+        
+
+        self.transform = transform 
+        self.contrastive_mode = contrastive_mode
+        self.mrn_classification_pairs = self.find_matching_pairs()
+
+    def get_data(self):
+        return torch.tensor(np.stack([np.load(row['filepath']).astype(np.float32) for _, row in self.df.iterrows()]))
+    
+    def get_denoised(self):
+        base_path = "/local2/acc/Glaucoma/Hiroshi_Denoised"
+        denoised_images = np.array([np.load(os.path.join(base_path, os.path.basename(fp)[:-4] + ".npy")) for fp in self.df.filepaths.values])
+        denoised_images = torch.tensor(np.expand_dims(denoised_images, axis=1), dtype=torch.float32)
+        return denoised_images
+
+    def find_matching_pairs(self):
+        return list(zip(self.df['MRN'], self.df['classification']))
+
+    def __len__(self):
+        return len(self.mrn_classification_pairs)
+
+    def __getitem__(self, index):
+        mrn, classification = self.mrn_classification_pairs[index]
+        idx = self.random_select_indices(mrn, classification)
+        use_denoised = self.denoised_data is not None and "train" in self.split and random.random() < 0.3 and self.contrastive_mode != "Denoise"
+        scan = self.denoised_data[idx] if use_denoised else self.data[idx]
+
+        if self.transform and not use_denoised and "train" in self.split:
+            scan = self.transform(scan)
+
+        if self.contrastive_mode == "None":
+            data_point = {
+                "data": scan,
+                "target": torch.tensor([classification], dtype=torch.float32)
+            }
+        else:
+            data_point = {
+                "data": scan,
+                "aux": self.denoised_data[idx],
+                "target": torch.tensor([classification], dtype=torch.float32)
+            }
+        return data_point
+    
+    def random_select_indices(self, mrn, classification):
+        indices = self.df.index[(self.df['MRN'] == mrn) & (self.df['classification'] == classification)].tolist()
+        idx = random.choice(indices)
+        return idx
 

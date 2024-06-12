@@ -17,7 +17,7 @@ from classification.model_factory import model_factory, FocalLoss
 from classification.dataloader_utils import split_and_process
 import pandas as pd
 
-from torchmetrics.classification import Accuracy, F1Score, AUROC, Specificity, Recall, ConfusionMatrix
+from torchmetrics.classification import Accuracy, F1Score, AUROC, Specificity, Recall, ConfusionMatrix, AveragePrecision
 import wandb
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, StepLR
 from datetime import datetime
@@ -41,7 +41,7 @@ class CustomLightningCLI(LightningCLI):
         trainer_config = self.config.fit.trainer
         current_time = datetime.now().strftime("%Y%m%d_%H%M")
         image_size = '_'.join(map(str, model_config.image_size))
-        custom_name = f"{model_config.model_name}d{model_config.dropout}b{data_config.batch_size}lr{model_config.lr}img{image_size}_{current_time}{model_config.contrastive_mode}{data_config.dataset_name}b_acc{trainer_config.accumulate_grad_batches}"
+        custom_name = f"{model_config.model_name}d{model_config.dropout}b{data_config.batch_size}lr{model_config.lr}img{image_size}_{current_time}{model_config.contrastive_mode}{data_config.dataset_name}b_acc{trainer_config.accumulate_grad_batches}{data_config.split_name}"
         self.config.fit.trainer.logger.init_args.name = custom_name
         super().before_instantiate_classes()
 
@@ -97,12 +97,14 @@ class GlaucomaModel(L.LightningModule):
         self.val_spec = Specificity(task="binary")        
         self.val_sens = Recall(task="binary")
         self.val_conf = ConfusionMatrix(task="binary")
+        self.val_auprc = AveragePrecision(task="binary")
         self.test_acc = Accuracy(task="binary")
         self.test_f1 = F1Score(task="binary")
         self.test_auroc = AUROC(task="binary")
         self.test_spec = Specificity(task="binary")        
         self.test_sens = Recall(task="binary")
         self.test_conf = ConfusionMatrix(task="binary")
+        self.test_auprc = AveragePrecision(task="binary")
 
     def forward(self, x, aux=None):
         if self.hparams.contrastive_mode=="None":
@@ -122,7 +124,7 @@ class GlaucomaModel(L.LightningModule):
         self.train_acc((logits > 0.5), y)
 
         self.log('train_loss', loss, sync_dist=True)
-        self.log("train_acc", self.train_acc, on_epoch=True, on_step=False)
+        self.log("train_acc", self.train_acc, on_epoch=True, on_step=False, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
@@ -141,26 +143,30 @@ class GlaucomaModel(L.LightningModule):
             self.val_spec(preds, y)
             self.val_sens(preds, y)
             self.val_auroc(logits, y)
+            self.val_auprc(logits, y.int())
             self.val_conf.update(preds, y)
-            self.log("val_loss", loss, on_epoch=True, on_step=False,add_dataloader_idx=False)
-            self.log("val_acc", self.val_acc,  on_epoch=True, on_step=False, add_dataloader_idx=False)
-            self.log("val_f1",  self.val_f1,   on_epoch=True, on_step=False, add_dataloader_idx=False)
-            self.log("val_sens",self.val_sens, on_epoch=True, on_step=False, add_dataloader_idx=False)
-            self.log("val_spec",self.val_spec, on_epoch=True, on_step=False, add_dataloader_idx=False)
-            self.log("val_auc", self.val_auroc,on_epoch=True, on_step=False, add_dataloader_idx=False)
+            self.log("val_loss",  loss,           on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("val_acc",   self.val_acc,   on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("val_f1",    self.val_f1,    on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("val_sens",  self.val_sens,  on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("val_spec",  self.val_spec,  on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("val_auc",   self.val_auroc, on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("val_auprc", self.val_auprc, on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
         else:
             self.test_acc(preds, y)
             self.test_f1(preds, y)
             self.test_spec(preds, y)
             self.test_sens(preds, y)
             self.test_auroc(logits, y)
+            self.test_auprc(logits, y.int())
             self.test_conf.update(preds, y)
-            self.log("test_loss", loss, on_epoch=True, on_step=False,add_dataloader_idx=False)
-            self.log("test_acc", self.test_acc,  on_epoch=True, on_step=False, add_dataloader_idx=False)
-            self.log("test_f1",  self.test_f1,   on_epoch=True, on_step=False, add_dataloader_idx=False)
-            self.log("test_sens",self.test_sens, on_epoch=True, on_step=False, add_dataloader_idx=False)
-            self.log("test_spec",self.test_spec, on_epoch=True, on_step=False, add_dataloader_idx=False)
-            self.log("test_auc", self.test_auroc,on_epoch=True, on_step=False, add_dataloader_idx=False)
+            self.log("test_loss",  loss,            on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("test_acc",   self.test_acc,   on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("test_f1",    self.test_f1,    on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("test_sens",  self.test_sens,  on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("test_spec",  self.test_spec,  on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("test_auc",   self.test_auroc, on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
+            self.log("test_auprc", self.test_auprc, on_epoch=True, on_step=False, add_dataloader_idx=False, sync_dist=True)
 
     def test_step(self, batch, batch_idx):
         if self.hparams.contrastive_mode == "None":
@@ -175,25 +181,27 @@ class GlaucomaModel(L.LightningModule):
         self.test_spec(preds, y)
         self.test_sens(preds, y)
         self.test_auroc(logits, y)
+        self.test_auprc(logits, y.int())
         self.test_conf.update(preds, y)
         loss = self.loss_fn(logits, y)
 
         stage = "test"
-        self.log(f"{stage}_loss", loss, on_epoch=True, on_step=False)
-        self.log(f"{stage}_acc", self.test_acc,   on_epoch=True, on_step=False)
-        self.log(f"{stage}_f1",  self.test_f1,     on_epoch=True, on_step=False)
-        self.log(f"{stage}_sens",self.test_sens, on_epoch=True, on_step=False)
-        self.log(f"{stage}_spec",self.test_spec, on_epoch=True, on_step=False)
-        self.log(f"{stage}_auc", self.test_auroc, on_epoch=True, on_step=False)
+        self.log(f"{stage}_loss",  loss, on_epoch=True, on_step=False)
+        self.log(f"{stage}_acc",   self.test_acc,   on_epoch=True, on_step=False)
+        self.log(f"{stage}_f1",    self.test_f1,     on_epoch=True, on_step=False)
+        self.log(f"{stage}_sens",  self.test_sens, on_epoch=True, on_step=False)
+        self.log(f"{stage}_spec",  self.test_spec, on_epoch=True, on_step=False)
+        self.log(f"{stage}_auc",   self.test_auroc, on_epoch=True, on_step=False)
+        self.log(f"{stage}_auprc", self.test_auprc, on_epoch=True, on_step=False)
 
-    def on_validation_epoch_end(self):
-        cm = self.val_conf.compute()
-        df_cm = pd.DataFrame(cm.cpu().numpy(), index = [0,1], columns = [0,1])
-        f, ax = plt.subplots(figsize = (20,15)) 
-        sn.heatmap(df_cm, annot=True, ax=ax)
-        wandb.log({"plot": wandb.Image(f) })
-        self.val_conf.reset() 
-        plt.close(f)
+    # def on_validation_epoch_end(self):
+    #     cm = self.val_conf.compute()
+    #     df_cm = pd.DataFrame(cm.cpu().numpy(), index = [0,1], columns = [0,1])
+    #     f, ax = plt.subplots(figsize = (20,15)) 
+    #     sn.heatmap(df_cm, annot=True, ax=ax)
+    #     wandb.log({"plot": wandb.Image(f) })
+    #     self.val_conf.reset() 
+    #     plt.close(f)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
@@ -248,7 +256,7 @@ class OCTDataModule(L.LightningDataModule):
         
         if stage == "test" or not self.hparams.tv:
             if self.hparams.dataset_name == "Macop":
-                self.test_dataset = MacOpDataset("Macular15.csv", "Optic15.csv", self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode)
+                self.test_dataset = MacOpDataset("Macular15.csv", "Optic15.csv", self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise)
             else:
                 self.test_dataset = ScanDataset(self.hparams.dataset_name, self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode, self.hparams.imbalance_factor)
 
