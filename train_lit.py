@@ -12,7 +12,7 @@ from monai.transforms import (
     Identity
 )
 from torch.utils.data import DataLoader
-from classification.dataloader import ScanDataset, MRNDataset, MacOpDataset
+from classification.dataloader import ScanDataset, MRNDataset, MacOpDataset, HiroshiScan
 from classification.model_factory import model_factory, FocalLoss
 from classification.dataloader_utils import split_and_process
 import pandas as pd
@@ -234,18 +234,35 @@ class OCTDataModule(L.LightningDataModule):
         self.training_data = ["train"] if not tv else ["train", "val"]
 
     def setup(self, stage=None):
-        transforms_list = Compose([
-        RandGaussianNoise(prob=self.hparams.prob), 
-        RandScaleIntensity(prob=self.hparams.prob, factors=(1,4)),
-        RandAdjustContrast(prob=self.hparams.prob),
-        RandAffine(prob=self.hparams.prob, translate_range=(15,10, 0), rotate_range=(0.02,0,0), scale_range=((-.1, .4), 0,0), padding_mode = "zeros"),
-        ])
+        if self.hparams.dataset_name == "Hiroshi":
+            transforms_list = Compose([
+                RandGaussianNoise(prob=self.hparams.prob, mean=0.0, std=0.01),  # Reduced std for less noise
+                RandScaleIntensity(prob=self.hparams.prob, factors=(0.9, 1.1)),  # Narrower range for intensity scaling
+                RandAdjustContrast(prob=self.hparams.prob, gamma=(0.9, 1.1)),  # Narrower gamma range for contrast adjustment
+                RandAffine(
+                    prob=self.hparams.prob,
+                    translate_range=(5, 5, 0),  # Reduced translation range
+                    rotate_range=(0.01, 0, 0),  # Reduced rotation range
+                    scale_range=((-.1, .1), 0, 0),  # Reduced scale range
+                    padding_mode="zeros"
+                ),
+            ])
+        else:
+            transforms_list = Compose([
+                RandGaussianNoise(prob=self.hparams.prob), 
+                RandScaleIntensity(prob=self.hparams.prob, factors=(1,4)),
+                RandAdjustContrast(prob=self.hparams.prob),
+                RandAffine(prob=self.hparams.prob, translate_range=(15,10, 0), rotate_range=(0.02,0,0), scale_range=((-.1, .4), 0,0), padding_mode = "zeros"),
+            ])
         transforms = OneOf([transforms_list, Identity()], weights=[self.hparams.prob, 1 - self.hparams.prob])
 
         if stage == "fit":
             if self.hparams.dataset_name == "Macop":
                 self.train_dataset = MacOpDataset("Macular15.csv", "Optic15.csv", self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise)
                 self.val_dataset = MacOpDataset("Macular15.csv", "Optic15.csv", self.hparams.split_name, ["test"], transforms, self.hparams.image_size, self.hparams.add_denoise)
+            elif self.hparams.dataset_name == "Hiroshi":
+                self.train_dataset = HiroshiScan(self.hparams.split_name, self.training_data, transforms, self.hparams.add_denoise, self.hparams.contrastive_mode,self.hparams.imbalance_factor)
+                self.val_dataset = HiroshiScan(self.hparams.split_name, ["test"], transforms, self.hparams.add_denoise, self.hparams.contrastive_mode,self.hparams.imbalance_factor)
             else:
                 if self.hparams.mrn_mode:
                     self.train_dataset = MRNDataset(self.hparams.dataset_name, self.hparams.split_name, self.training_data, transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode, self.hparams.imbalance_factor)
@@ -257,6 +274,8 @@ class OCTDataModule(L.LightningDataModule):
         if stage == "test" or not self.hparams.tv:
             if self.hparams.dataset_name == "Macop":
                 self.test_dataset = MacOpDataset("Macular15.csv", "Optic15.csv", self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise)
+            elif self.hparams.dataset_name == "Hiroshi":
+                self.test_dataset = HiroshiScan(self.hparams.split_name, ["val"], transforms, self.hparams.add_denoise, self.hparams.contrastive_mode,self.hparams.imbalance_factor)
             else:
                 self.test_dataset = ScanDataset(self.hparams.dataset_name, self.hparams.split_name, ["val"], transforms, self.hparams.image_size, self.hparams.add_denoise, self.hparams.contrastive_mode, self.hparams.imbalance_factor)
 

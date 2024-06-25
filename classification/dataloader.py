@@ -212,7 +212,7 @@ class MacOpDataset(Dataset):
         return macular_idx, optic_idx
     
 
-class HiroshiDataset(Dataset):
+class HiroshiMRN(Dataset):
     def __init__(self, split_name, split, transform, add_denoise, contrastive_mode, imbalance_factor):
         self.split = split
         temp = pd.read_csv('/home/acc/Glaucoma/Glaucoma/hiroshi_dataset_splits.csv')
@@ -243,7 +243,9 @@ class HiroshiDataset(Dataset):
         self.mrn_classification_pairs = self.find_matching_pairs()
 
     def get_data(self):
-        return torch.tensor(np.stack([np.load(row['filepath']).astype(np.float32) for _, row in self.df.iterrows()]))
+        numpy_arrays = [np.load(row['filepaths']).astype(np.float32)[np.newaxis, ...] for _, row in self.df.iterrows()]
+        stacked_array = np.transpose(np.stack(numpy_arrays), (0, 1, 3, 4, 2))
+        return torch.tensor(stacked_array)
     
     def get_denoised(self):
         base_path = "/local2/acc/Glaucoma/Hiroshi_Denoised"
@@ -284,3 +286,57 @@ class HiroshiDataset(Dataset):
         idx = random.choice(indices)
         return idx
 
+class HiroshiScan(Dataset):
+    def __init__(self, split_name, split, transform, add_denoise, contrastive_mode, imbalance_factor):
+        self.split = split
+        temp = pd.read_csv('/home/acc/Glaucoma/Glaucoma/hiroshi_dataset_splits.csv')
+        # temp = temp.sample(frac=1).reset_index(drop=True) if "train" not in split else temp
+        self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
+
+        # if imbalance_factor != -1 and "train" in split:
+        #     N = min(len(self.df[self.df.classification == 0]), len(self.df[self.df.classification == 1])) 
+        #     self.df = pd.concat([self.df[self.df.classification == 0], self.df[self.df.classification == 1][:int(N * imbalance_factor)]]).reset_index(drop=True) 
+       
+        self.data = self.get_data()
+        if add_denoise or contrastive_mode == "Denoise":
+            self.denoised_data = self.get_denoised()
+        else:
+            self.denoised_data = None
+
+        self.transform = transform 
+        self.contrastive_mode = contrastive_mode
+        self.targets = torch.tensor(self.df.classification.values[:, np.newaxis], dtype=torch.float32)
+
+    def get_data(self):
+        numpy_arrays = [np.load(row['filepaths']).astype(np.float32)[np.newaxis, ...] for _, row in self.df.iterrows()]
+        stacked_array = np.transpose(np.stack(numpy_arrays), (0, 1, 3, 4, 2))
+        return torch.tensor(stacked_array)
+    
+    def get_denoised(self):
+        base_path = "/local2/acc/Glaucoma/Hiroshi_Denoised"
+        denoised_images = np.array([np.load(os.path.join(base_path, os.path.basename(fp)[:-4] + ".npy")) for fp in self.df.filepaths.values])
+        denoised_images = torch.tensor(np.expand_dims(denoised_images, axis=1), dtype=torch.float32)
+        return denoised_images
+    
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        use_denoised = self.denoised_data is not None and "train" in self.split and random.random() < 0.3 and self.contrastive_mode != "Denoise"
+        scan = self.denoised_data[idx] if use_denoised else self.data[idx]
+
+        if self.transform and not use_denoised and "train" in self.split:
+            scan = self.transform(scan)
+
+        if self.contrastive_mode == "None":
+            data_point = {
+                "data": scan,
+                "target": self.targets[idx]
+             }
+        else:
+            data_point = {
+                "data": scan,
+                "aux": self.denoised_data[idx],
+                "target": self.targets[idx]
+            }
+        return data_point
