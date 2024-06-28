@@ -6,6 +6,7 @@ from tqdm import tqdm
 import os
 from classification.dataloader_utils import process_scan, adjust_filepath
 import random
+from monai.transforms import NormalizeIntensity
 
 class ScanDataset(Dataset):
     def __init__(self, fp, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor):
@@ -245,7 +246,9 @@ class HiroshiMRN(Dataset):
     def get_data(self):
         numpy_arrays = [np.load(row['filepaths']).astype(np.float32)[np.newaxis, ...] for _, row in self.df.iterrows()]
         stacked_array = np.transpose(np.stack(numpy_arrays), (0, 1, 3, 4, 2))
-        return torch.tensor(stacked_array)
+        normalize = NormalizeIntensity()
+        normalized_array = normalize(stacked_array)
+        return torch.tensor(normalized_array)
     
     def get_denoised(self):
         base_path = "/local2/acc/Glaucoma/Hiroshi_Denoised"
@@ -310,7 +313,9 @@ class HiroshiScan(Dataset):
     def get_data(self):
         numpy_arrays = [np.load(row['filepaths']).astype(np.float32)[np.newaxis, ...] for _, row in self.df.iterrows()]
         stacked_array = np.transpose(np.stack(numpy_arrays), (0, 1, 3, 4, 2))
-        return torch.tensor(stacked_array)
+        normalize = NormalizeIntensity()
+        normalized_array = normalize(stacked_array)
+        return torch.tensor(normalized_array)
     
     def get_denoised(self):
         base_path = "/local2/acc/Glaucoma/Hiroshi_Denoised"
