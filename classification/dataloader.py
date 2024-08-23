@@ -16,7 +16,7 @@ class ScanDataset(Dataset):
         if "train" not in split and "15" in fp:
             fp = self.region + "15_og.csv"
             
-        temp = pd.read_csv(fp)
+        temp = pd.read_csv(os.path.join("path", fp))
         temp = temp.sample(frac=1).reset_index(drop=True) if "train" not in split else temp
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
 
@@ -71,7 +71,7 @@ class MRNDataset(Dataset):
     def __init__(self, fp, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor):
         self.split = split
         self.region = "Macular" if "Macular" in fp else "Optic"
-        temp = pd.read_csv(fp)
+        temp = pd.read_csv(os.path.join("path", fp))
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
 
         if imbalance_factor != -1 and "train" in split:
@@ -146,8 +146,8 @@ class MacOpDataset(Dataset):
         self.add_denoise = add_denoise
 
         if "train" not in split and "15" in mc_fp:
-            mc_fp = "Macular15_og.csv"
-            op_fp = "Optic15_og.csv"
+            mc_fp = "data/Macular15_og.csv"
+            op_fp = "data/Optic15_og.csv"
 
         mac_df = pd.read_csv(mc_fp)
         self.macular_df = mac_df[mac_df[split_name].isin(split)].reset_index(drop=True)
@@ -216,7 +216,7 @@ class MacOpDataset(Dataset):
 class HiroshiMRN(Dataset):
     def __init__(self, split_name, split, transform, add_denoise, contrastive_mode, imbalance_factor):
         self.split = split
-        temp = pd.read_csv('/home/acc/Glaucoma/Glaucoma/hiroshi_dataset_splits.csv')
+        temp = pd.read_csv('/home/acc/Glaucoma/Glaucoma/data/hiroshi_dataset_splits.csv')
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
 
         if imbalance_factor != -1 and "train" in split:
@@ -251,10 +251,22 @@ class HiroshiMRN(Dataset):
         return torch.tensor(normalized_array).clone().detach()
     
     def get_denoised(self):
-        base_path = "/local2/acc/Glaucoma/Hiroshi_Denoised"
-        denoised_images = np.array([np.load(os.path.join(base_path, os.path.basename(fp)[:-4] + ".npy")) for fp in self.df.filepaths.values])
-        denoised_images = torch.tensor(np.expand_dims(denoised_images, axis=1), dtype=torch.float32)
-        return denoised_images
+        denoised_images = []
+        base_path = "/local2/acc/Glaucoma/Hiroshi_ONH_OCT_seg"
+        
+        for _, row in self.df.iterrows():
+            filename = os.path.basename(row['filepaths'])
+            denoised_filepath = os.path.join(base_path, filename.replace('.npy', '_seg.npy'))
+            if os.path.exists(denoised_filepath):
+                denoised_image = np.load(denoised_filepath).astype(np.float32)[np.newaxis, ...]
+                denoised_images.append(denoised_image)
+            else:
+                raise FileNotFoundError(f"Segmented file not found for {filename}")
+
+        stacked_denoised_array = np.transpose(np.stack(denoised_images), (0, 1, 3, 4, 2))
+        normalize = NormalizeIntensity()
+        normalized_denoised_array = normalize(stacked_denoised_array)
+        return torch.from_numpy(normalized_denoised_array.numpy())
 
     def find_matching_pairs(self):
         return list(zip(self.df['MRN'], self.df['classification']))
@@ -292,7 +304,7 @@ class HiroshiMRN(Dataset):
 class HiroshiScan(Dataset):
     def __init__(self, dataset_name, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor):
         self.split = split
-        temp = pd.read_csv('/home/acc/Glaucoma/Glaucoma/hiroshi_dataset_splits.csv')
+        temp = pd.read_csv('/home/acc/Glaucoma/Glaucoma/data/hiroshi_dataset_splits.csv')
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
 
         # if imbalance_factor != -1 and "train" in split:

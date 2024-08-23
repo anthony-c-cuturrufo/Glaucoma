@@ -27,7 +27,7 @@ for exp in "${!configs[@]}"; do
     run_experiment() {
         source ~/.bashrc
         conda activate glauconda2
-        python train_lit2.py fit \$1
+        python train.py fit \$1
     }
     run_experiment '${configs[$exp]}' > logs/${exp}.log 2>&1
     "
