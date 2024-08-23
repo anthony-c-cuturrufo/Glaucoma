@@ -21,17 +21,12 @@ To run the training script and start training your model, follow the instruction
 3. For dependency management, we use a Conda environment. Please email me to request the environment YAML file. Once received, create and activate the Conda environment:
 
    ```
-   conda env create -f environment.yml
-   conda activate glaucoma_env
+   conda env create -f glauconda_backup.yml
    ```
 
-4. Run the main training script:
+3. Run the main training script:
 
-   ```
-   python train.py --model_name ResNext50 --cuda cuda:2 --batch_size 4 --dropout 0.2 --contrastive_mode None --augment True
-   ```
-
-   Or check out `./tune_macular_dist.sh`
+   Run `./tune_optic.sh` to run an example training run of the Glaucoma classification model.
 
 ## Script Arguments
 

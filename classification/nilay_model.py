@@ -212,8 +212,8 @@ class dual_paths(nn.Module):
         self.fc_action.bias.data.zero_()
 
 
-    def forward(self, x1, x2):
-        x_noisy, x_denoised = x1, x2             #(b,1,128,200,200)
+    def forward(self, x_noisy, x_denoised):
+#        x_noisy, x_denoised = x             #(b,1,128,200,200)
 
         x_noisy = self.features(x_noisy)        #(b,2048,4,7,7)
         x_denoised = self.features(x_denoised)        #(b,2048,4,7,7)
@@ -222,16 +222,16 @@ class dual_paths(nn.Module):
         x_noisy = self.linear(x_noisy)             #(b,4,7,7,512)
         x_noisy = x_noisy.permute((0,4,1,2,3))     #(b,512,4,7,7)
 
-        x_denoised = x_denoised((0,2,3,4,1))            #(b,4,7,7,2048)
+        x_denoised = x_denoised.permute((0,2,3,4,1))      #(b,4,7,7,2048)
         x_denoised = self.linear(x_denoised)              #(b,4,7,7,512)
         x_denoised = x_denoised.permute((0,4,1,2,3))      #(b,512,4,7,7)
 
         x_noisy = self.avgpool(x_noisy)                            #(b,512,4,1,1)
-        x_noisy = x_noisy.view(x_noisy.size(0), self.hidden_size, 8)  #(b,512,4)
+        x_noisy = x_noisy.view(x_noisy.size(0), self.hidden_size, 4)  #(b,512,4)
         x_noisy = x_noisy.transpose(1, 2)                        #(b,4,512)
 
         x_denoised = self.avgpool(x_denoised)                        #(b,512,4,1,1)
-        x_deonised = x_denoised.view(x_denoised.size(0), self.hidden_size, 8)  #(b,512,4)
+        x_deonised = x_denoised.view(x_denoised.size(0), self.hidden_size, 4)  #(b,512,4)
         x_denosied = x_denoised.transpose(1, 2)                       #(b,4,512)
 
         x_cat = torch.cat((x_noisy, x_denosied), 1)                  #(b,8,512)
@@ -242,3 +242,4 @@ class dual_paths(nn.Module):
         output=self.dp(classificationOut)           #(b,512)
         x = self.fc_action(output)                   #(b,11)
         return x
+

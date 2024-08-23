@@ -85,9 +85,11 @@ class ResNetWrapper(nn.Module):
             self.fc_layers.add_module('dropout', nn.Dropout(dropout_prob))
             in_features = out_features
         self.fc_layers.add_module('fc_final', nn.Linear(in_features, num_classes))
+        self.dropout = nn.Dropout(dropout_prob)
 
     def forward(self, x):
         output = self.resnet(x)
+        output = self.dropout(output)
         output = self.fc_layers(output)
         return output
     
@@ -159,13 +161,11 @@ def model_factory(
     num_classes=2, 
     contrastive_mode = "None", 
     contrastive_layer_size = 128,
-    device="cuda", 
     conv_layers = [32,64], 
     fc_layers = [16], 
     pretrained=True, 
     freeze=False, 
     use_dual_paths=False, 
-    path_to_weights="/local2/acc/MedicalNet_pretrained_branch/MedicalNet_pytorch_files2/pretrain/resnet_200.pth",
     patch_s=18, 
     hidden_s=768,
     mlp_d=3072,
@@ -292,7 +292,16 @@ def model_factory(
                 shortcut_type="B",
                 bias_downsample=False)
         else:
-            raise ValueError("No training from scratch implemented")
+            if model_name == "ResNet10":
+                model = monai.networks.nets.resnet10(
+                spatial_dims=3,
+                n_input_channels=1,
+                num_classes=n_classes)
+            else:
+                model = monai.networks.nets.resnet50(
+                spatial_dims=3,
+                n_input_channels=1,
+                num_classes=n_classes)
     elif model_name == "ResNet18":
         if pretrained:
             model = ResNetWrapper(

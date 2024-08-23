@@ -248,7 +248,7 @@ class HiroshiMRN(Dataset):
         stacked_array = np.transpose(np.stack(numpy_arrays), (0, 1, 3, 4, 2))
         normalize = NormalizeIntensity()
         normalized_array = normalize(stacked_array)
-        return torch.tensor(normalized_array)
+        return torch.tensor(normalized_array).clone().detach()
     
     def get_denoised(self):
         base_path = "/local2/acc/Glaucoma/Hiroshi_Denoised"
@@ -290,10 +290,9 @@ class HiroshiMRN(Dataset):
         return idx
 
 class HiroshiScan(Dataset):
-    def __init__(self, split_name, split, transform, add_denoise, contrastive_mode, imbalance_factor):
+    def __init__(self, dataset_name, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor):
         self.split = split
         temp = pd.read_csv('/home/acc/Glaucoma/Glaucoma/hiroshi_dataset_splits.csv')
-        # temp = temp.sample(frac=1).reset_index(drop=True) if "train" not in split else temp
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
 
         # if imbalance_factor != -1 and "train" in split:
@@ -315,13 +314,25 @@ class HiroshiScan(Dataset):
         stacked_array = np.transpose(np.stack(numpy_arrays), (0, 1, 3, 4, 2))
         normalize = NormalizeIntensity()
         normalized_array = normalize(stacked_array)
-        return torch.tensor(normalized_array)
+        return torch.from_numpy(normalized_array.numpy())
     
     def get_denoised(self):
-        base_path = "/local2/acc/Glaucoma/Hiroshi_Denoised"
-        denoised_images = np.array([np.load(os.path.join(base_path, os.path.basename(fp)[:-4] + ".npy")) for fp in self.df.filepaths.values])
-        denoised_images = torch.tensor(np.expand_dims(denoised_images, axis=1), dtype=torch.float32)
-        return denoised_images
+        denoised_images = []
+        base_path = "/local2/acc/Glaucoma/Hiroshi_ONH_OCT_seg"
+        
+        for _, row in self.df.iterrows():
+            filename = os.path.basename(row['filepaths'])
+            denoised_filepath = os.path.join(base_path, filename.replace('.npy', '_seg.npy'))
+            if os.path.exists(denoised_filepath):
+                denoised_image = np.load(denoised_filepath).astype(np.float32)[np.newaxis, ...]
+                denoised_images.append(denoised_image)
+            else:
+                raise FileNotFoundError(f"Segmented file not found for {filename}")
+
+        stacked_denoised_array = np.transpose(np.stack(denoised_images), (0, 1, 3, 4, 2))
+        normalize = NormalizeIntensity()
+        normalized_denoised_array = normalize(stacked_denoised_array)
+        return torch.from_numpy(normalized_denoised_array.numpy())
     
     def __len__(self):
         return len(self.df)
