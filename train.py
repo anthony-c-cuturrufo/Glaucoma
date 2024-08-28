@@ -67,19 +67,19 @@ class GlaucomaModel(L.LightningModule):
         
         for metric, name in zip(metrics, metric_names):
             metric(preds, y)
-            self.log(f"{stage}_{name}", metric, on_epoch=True, sync_dist=True)
+            self.log(f"{stage}_{name}", metric, on_epoch=True, on_step=True, sync_dist=True, logger=True)
         
         return loss
 
     def training_step(self, batch, batch_idx):
         loss = self._shared_step(batch, "train")
-        self.log('train_loss', loss, sync_dist=True)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, sync_dist=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         stage = "val" if dataloader_idx == 0 else "test"
         loss = self._shared_step(batch, stage)
-        self.log(f"{stage}_loss", loss, on_epoch=True, sync_dist=True)
+        self.log(f"{stage}_loss", loss, on_epoch=True, on_step=True, sync_dist=True, logger=True)
         return loss
 
     def test_step(self, batch, batch_idx):

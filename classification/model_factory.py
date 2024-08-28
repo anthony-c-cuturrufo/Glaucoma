@@ -69,9 +69,17 @@ class ResNetWrapper(nn.Module):
         elif name == "ResNet18":
             self.resnet = monai.networks.nets.resnet18(*args, **kwargs)
             self.fc_size = 512
-        else:
+        elif name == "ResNet50":
             self.resnet = monai.networks.nets.resnet50(*args, **kwargs)
             self.fc_size = 2048
+        elif name == "ResNet101":
+            self.resnet = monai.networks.nets.resnet101(*args, **kwargs)
+            self.fc_size = 2048
+        elif name == "ResNet200":
+            self.resnet = monai.networks.nets.resnet200(*args, **kwargs)
+            self.fc_size = 2048
+        else:
+            raise NotImplementedError("model not implemented")
 
         if freeze:
             for param in self.resnet.parameters():
@@ -277,7 +285,7 @@ def model_factory(
             in_channels=1,
             num_classes=n_classes,
             dropout_prob=dropout)
-    elif model_name in ["ResNet10", "ResNet50"]:
+    elif model_name in ["ResNet10", "ResNet50", "ResNet101", "ResNet200"]:
         if pretrained:
             model = ResNetWrapper(
                 model_name,
@@ -297,11 +305,13 @@ def model_factory(
                 spatial_dims=3,
                 n_input_channels=1,
                 num_classes=n_classes)
-            else:
+            elif model_name == "ResNet50":
                 model = monai.networks.nets.resnet50(
                 spatial_dims=3,
                 n_input_channels=1,
                 num_classes=n_classes)
+            else:
+                raise NotImplementedError("TODO implement")
     elif model_name == "ResNet18":
         if pretrained:
             model = ResNetWrapper(
