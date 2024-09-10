@@ -1,0 +1,129 @@
+# lightning.pytorch==2.2.1
+seed_everything: 1
+trainer:
+  accelerator: gpu
+  # strategy: ddp
+  devices:
+  - 3
+  num_nodes: 1
+  precision: 16-mixed
+  default_root_dir: /local2/acc/Glaucoma/logs/
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      name: null
+      save_dir: /local2/acc/Glaucoma/logs/
+      version: null
+      offline: false
+      dir: null
+      id: null
+      anonymous: null
+      project: null
+      log_model: false
+      experiment: null
+      prefix: ''
+      checkpoint_name: null
+      job_type: null
+      config: null
+      entity: null
+      reinit: null
+      tags: null
+      group: null
+      notes: null
+      magic: null
+      config_exclude_keys: null
+      config_include_keys: null
+      mode: null
+      allow_val_change: null
+      resume: null
+      force: null
+      tensorboard: null
+      sync_tensorboard: null
+      monitor_gym: null
+      save_code: null
+      settings: null
+  callbacks: 
+    # - class_path: lightning.pytorch.callbacks.StochasticWeightAveraging
+    #   init_args:
+    #     swa_lrs: 1e-2
+    # - class_path: lightning.pytorch.callbacks.LearningRateFinder
+    #   init_args:
+    #     num_training_steps: 1000
+  fast_dev_run: false
+  max_epochs: 400
+  min_epochs: null
+  max_steps: -1
+  min_steps: null
+  max_time: null
+  limit_train_batches: null
+  limit_val_batches: null
+  limit_test_batches: null
+  limit_predict_batches: null
+  overfit_batches: 0.0
+  val_check_interval: null
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: null
+  log_every_n_steps: null
+  enable_checkpointing: null
+  enable_progress_bar: null
+  enable_model_summary: null
+  accumulate_grad_batches: 1
+  # gradient_clip_val: 1
+  gradient_clip_algorithm: null
+  deterministic: null
+  benchmark: null
+  inference_mode: true
+  use_distributed_sampler: true
+  profiler: null
+  detect_anomaly: false
+  barebones: false
+  plugins: null
+  sync_batchnorm: false
+  reload_dataloaders_every_n_epochs: 0
+  default_root_dir: null
+model:
+  model_name: 3DCNN
+  image_size:
+  - 128
+  - 64
+  - 64
+  dropout: 0
+  num_classes: 1
+  contrastive_mode: None
+  conv_layers:
+  - 32
+  - 64
+  fc_layers:
+  - 32
+  patch_s: 20 
+  hidden_s: 256
+  mlp_d: 1024
+  num_l: 8
+  num_h: 8
+  qkv: False
+  pretrained: true
+  freeze: false
+  lr: 1e-3
+  weight_decay: 0
+  pos_weight: 1
+  use_dual_paths: false
+  cos_anneal: -1
+  step_decay: -1
+  opt: Adam
+data:
+  dataset_name: Hiroshi
+  batch_size: 64
+  num_workers: 6
+  image_size:
+  - 128
+  - 64
+  - 64
+  imbalance_factor: -1
+  mrn_mode: false
+  split_name: split3
+  tv: false
+  contrastive_mode: None
+  prob: 0.8
+  add_denoise: false
+  num_classes: 1
+ckpt_path: null
