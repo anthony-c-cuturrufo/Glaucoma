@@ -324,7 +324,7 @@ class HiroshiScan(Dataset):
     def get_data(self):
         numpy_arrays = [np.load(row['filepaths']).astype(np.float32)[np.newaxis, ...] for _, row in self.df.iterrows()]
         stacked_array = np.transpose(np.stack(numpy_arrays), (0, 1, 3, 4, 2))
-        normalize = NormalizeIntensity()
+        normalize = NormalizeIntensity(nonzero=True)
         normalized_array = normalize(stacked_array)
         return torch.from_numpy(normalized_array.numpy())
     
@@ -342,7 +342,7 @@ class HiroshiScan(Dataset):
                 raise FileNotFoundError(f"Segmented file not found for {filename}")
 
         stacked_denoised_array = np.transpose(np.stack(denoised_images), (0, 1, 3, 4, 2))
-        normalize = NormalizeIntensity()
+        normalize = NormalizeIntensity(nonzero=True)
         normalized_denoised_array = normalize(stacked_denoised_array)
         return torch.from_numpy(normalized_denoised_array.numpy())
     
@@ -353,7 +353,7 @@ class HiroshiScan(Dataset):
         use_denoised = self.denoised_data is not None and "train" in self.split and random.random() < 0.3 and self.contrastive_mode != "Denoise"
         scan = self.denoised_data[idx] if use_denoised else self.data[idx]
 
-        if self.transform and not use_denoised and "train" in self.split:
+        if self.transform and "train" in self.split:
             scan = self.transform(scan)
 
         if self.contrastive_mode == "None":

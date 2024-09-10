@@ -8,6 +8,58 @@ from monai.networks.blocks.squeeze_and_excitation import SEResNeXtBottleneck
 from classification.nilay_model import dual_paths
 from classification.dual_vit import DualViT
 
+class OCT3DCNNEncoder(nn.Module):
+    def __init__(self, num_classes=1, in_channels=1, dropout_rate=.2):  # Adjust 'num_classes' based on your specific task
+        super(OCT3DCNNEncoder, self).__init__()
+        # Convolutional layers with specified kernel sizes and strides
+        self.conv1 = nn.Conv3d(in_channels=in_channels, out_channels=32, kernel_size=7, stride=1)
+        self.batch_norm1 = nn.BatchNorm3d(32)
+        self.pool1 = nn.MaxPool3d(kernel_size=1, stride=2)
+        
+        self.conv2 = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=5, stride=1)
+        self.batch_norm2 = nn.BatchNorm3d(32)
+        
+        self.conv3 = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=3, stride=1)
+        self.batch_norm3 = nn.BatchNorm3d(32)
+        
+        self.conv4 = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=3, stride=1)
+        self.batch_norm4 = nn.BatchNorm3d(32)
+        
+        self.conv5 = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=3, stride=1)
+        # self.batch_norm5 = nn.BatchNorm3d(32)
+
+        # self.conv6 = nn.Conv3d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1)
+        # self.batch_norm6 = nn.BatchNorm3d(32)
+        
+        # Global Average Pooling
+        self.global_avg_pool = nn.AdaptiveAvgPool3d((1, 1, 1))
+        
+        # Fully connected layer and softmax for classification
+        self.fc = nn.Linear(32, num_classes)  # num_classes should be set to the number of output classes
+        self.dropout = nn.Dropout(dropout_rate)
+        
+    def forward(self, x):
+        x = F.relu(self.batch_norm1(self.pool1(self.conv1(x))))
+        
+        x = F.relu(self.batch_norm2(self.conv2(x)))
+        
+        x = F.relu(self.batch_norm3(self.conv3(x)))
+        
+        x = F.relu(self.batch_norm4(self.conv4(x)))
+        
+        x = F.relu(self.conv5(x))
+        # x = F.relu(self.batch_norm5(self.conv5(x)))
+
+        # x = F.relu(self.batch_norm6(self.conv6(x)))
+        
+        x = self.global_avg_pool(x)
+        x = x.view(x.size(0), -1)  # Flatten the output for the fully connected layer
+        x = self.dropout(x)
+        x = self.fc(x)
+        
+        return x  
+
+
     
 class Efficient3DCNN(nn.Module):
     def __init__(self, in_channels, num_classes, conv_layers=[32,64], fc_layers=[], dropout_rate=0.5):
@@ -15,7 +67,7 @@ class Efficient3DCNN(nn.Module):
 
         # Conv3D layers
         layers = [nn.Conv3d(in_channels if i == 0 else conv_layers[i-1], 
-                            conv_layers[i], kernel_size=3, stride=2, padding=1) 
+                            conv_layers[i], kernel_size=3, stride=1, padding=1) 
                   for i in range(len(conv_layers))]
         self.conv_layers = nn.Sequential(*layers, nn.MaxPool3d(kernel_size=2, stride=2, padding=0))
 
@@ -183,7 +235,8 @@ def model_factory(
 ):
     n_classes = contrastive_layer_size if contrastive_mode != "None" and model_name != "DualViT" else num_classes
     if model_name == "3DCNN":
-        model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
+        # model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
+        model = OCT3DCNNEncoder(num_classes=n_classes, in_channels=1, dropout_rate=dropout)
     elif model_name == "ViT":
         model = ViTWrapper(
             in_channels=1, 

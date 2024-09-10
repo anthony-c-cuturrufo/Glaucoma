@@ -15,9 +15,11 @@ configs=(
     # ["resnet50"]="--config cfgs/cfg_resnet50.yml"
     # ["nilay"]="--config cfgs/cfg_nilay.yml"
     ["hiroshi"]="--config cfgs/cfg_hiroshi.yml"
-    ["hiroshi2"]="--config cfgs/cfg_hiroshi2.yml"
-    ["hiroshi3"]="--config cfgs/cfg_hiroshi3.yml"
+    # ["hiroshi2"]="--config cfgs/cfg_hiroshi2.yml"
+    # ["hiroshi3"]="--config cfgs/cfg_hiroshi3.yml"
     # ["hiroshi4"]="--config cfgs/cfg_hiroshi4.yml"
+    # ["hiroshi5"]="--config cfgs/cfg_hiroshi5.yml"
+    # ["hiroshi6"]="--config cfgs/cfg_hiroshi6.yml"
 
 
 )

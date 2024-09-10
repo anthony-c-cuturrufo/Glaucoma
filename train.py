@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from monai.transforms import (
     Compose, OneOf, RandGaussianNoise, RandScaleIntensity, 
-    RandAdjustContrast, RandAffine, Identity
+    RandAdjustContrast, RandAffine, Identity, RandFlip
 )
 from torch.utils.data import DataLoader
 from classification.dataloader import ScanDataset, MRNDataset, MacOpDataset, HiroshiScan
@@ -35,11 +35,12 @@ class CustomLightningCLI(LightningCLI):
 
 
 class GlaucomaModel(L.LightningModule):
-    def __init__(self, lr=1e-5, weight_decay=1e-2, cos_anneal=-1, step_decay=-1, pos_weight=1, **kwargs):
+    def __init__(self, lr=1e-5, weight_decay=1e-2, cos_anneal=-1, step_decay=-1, pos_weight=1, opt="Adam", **kwargs):
         super().__init__()
         self.save_hyperparameters()
         self.model = model_factory(**kwargs)
-        self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([self.hparams.pos_weight]))
+        # self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([self.hparams.pos_weight]))
+        self.loss_fn = torch.nn.BCEWithLogitsLoss()
 
         metric_classes = [
             Accuracy, F1Score, AUROC, Specificity, Recall, AveragePrecision
@@ -67,26 +68,31 @@ class GlaucomaModel(L.LightningModule):
         
         for metric, name in zip(metrics, metric_names):
             metric(preds, y)
-            self.log(f"{stage}_{name}", metric, on_epoch=True, on_step=True, sync_dist=True, logger=True)
+            self.log(f"{stage}_{name}", metric, on_epoch=True, sync_dist=True, logger=True)
         
         return loss
 
     def training_step(self, batch, batch_idx):
         loss = self._shared_step(batch, "train")
-        self.log('train_loss', loss, on_step=True, on_epoch=True, sync_dist=True, logger=True)
+        self.log('train_loss', loss, on_epoch=True, sync_dist=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         stage = "val" if dataloader_idx == 0 else "test"
         loss = self._shared_step(batch, stage)
-        self.log(f"{stage}_loss", loss, on_epoch=True, on_step=True, sync_dist=True, logger=True)
+        self.log(f"{stage}_loss", loss, on_epoch=True, sync_dist=True, logger=True)
         return loss
 
     def test_step(self, batch, batch_idx):
         return self.validation_step(batch, batch_idx, dataloader_idx=1)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+        if self.hparams.opt == "Adam":
+            optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+        elif self.hparams.opt == "AdamW":
+            optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+        elif self.hparams.opt == "NAdam":
+            optimizer = torch.optim.NAdam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
         if self.hparams.cos_anneal > 0:
             scheduler = CosineAnnealingLR(optimizer, T_max=self.hparams.cos_anneal)
             return {
@@ -124,8 +130,22 @@ class OCTDataModule(L.LightningDataModule):
 
     def setup(self, stage=None):
         prob, dataset_name, split_name = self.hparams.prob, self.hparams.dataset_name, self.hparams.split_name
-        transform = OneOf([
-            Compose([
+        # transform = OneOf([
+            # Compose([
+                # RandGaussianNoise(prob=prob, std=0.01 if dataset_name == "Hiroshi" else 1),
+                # RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if dataset_name == "Hiroshi" else (1, 4)),
+                # RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if dataset_name == "Hiroshi" else 1),
+                # RandAffine(
+                #     prob=prob, translate_range=(5, 5, 0) if dataset_name == "Hiroshi" else (15, 10, 0),
+                    # rotate_range=(0.01, 0, 0) if dataset_name == "Hiroshi" else (0.02, 0, 0),
+                    # scale_range=((-.1, .1), 0, 0) if dataset_name == "Hiroshi" else ((-.1, .4), 0, 0),
+                    # padding_mode="zeros"
+                # ),
+            #     RandFlip(spatial_axis=0, prob=prob),
+            #     RandFlip(spatial_axis=1, prob=prob)
+            # ]), Identity()], weights=[prob, 1 - prob])
+
+        transform = Compose([
                 RandGaussianNoise(prob=prob, std=0.01 if dataset_name == "Hiroshi" else 1),
                 RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if dataset_name == "Hiroshi" else (1, 4)),
                 RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if dataset_name == "Hiroshi" else 1),
@@ -135,7 +155,9 @@ class OCTDataModule(L.LightningDataModule):
                     scale_range=((-.1, .1), 0, 0) if dataset_name == "Hiroshi" else ((-.1, .4), 0, 0),
                     padding_mode="zeros"
                 ),
-            ]), Identity()], weights=[prob, 1 - prob])
+                RandFlip(spatial_axis=0, prob=prob),
+                RandFlip(spatial_axis=1, prob=prob)
+            ])
 
         DatasetClass = {
             "Macop": MacOpDataset, "Hiroshi": HiroshiScan
@@ -144,11 +166,11 @@ class OCTDataModule(L.LightningDataModule):
         self.train_dataset = DatasetClass(dataset_name, split_name, self.training_data, transform, 
                                           self.hparams.image_size, self.hparams.add_denoise,
                                           self.hparams.contrastive_mode, self.hparams.imbalance_factor)
-        self.val_dataset = DatasetClass(dataset_name, split_name, ["test"], transform,
+        self.val_dataset = DatasetClass(dataset_name, split_name, ["val"], transform,
                                         self.hparams.image_size, self.hparams.add_denoise,
                                         self.hparams.contrastive_mode, self.hparams.imbalance_factor)
         if stage == "test" or not self.hparams.tv:
-            self.test_dataset = DatasetClass(dataset_name, split_name, ["val"], transform,
+            self.test_dataset = DatasetClass(dataset_name, split_name, ["test"], transform,
                                              self.hparams.image_size, self.hparams.add_denoise,
                                              self.hparams.contrastive_mode, self.hparams.imbalance_factor)
 

@@ -8,8 +8,6 @@ __pycache__/
 
 *.yaml
 
-*.yml
-
 *.ckpt
 
 *.svg
