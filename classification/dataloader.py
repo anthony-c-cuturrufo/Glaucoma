@@ -353,7 +353,7 @@ class HiroshiScan(Dataset):
         use_denoised = self.denoised_data is not None and "train" in self.split and random.random() < 0.3 and self.contrastive_mode != "Denoise"
         scan = self.denoised_data[idx] if use_denoised else self.data[idx]
 
-        if self.transform and "train" in self.split:
+        if self.transform:
             scan = self.transform(scan)
 
         if self.contrastive_mode == "None":

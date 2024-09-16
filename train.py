@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from monai.transforms import (
     Compose, OneOf, RandGaussianNoise, RandScaleIntensity, 
-    RandAdjustContrast, RandAffine, Identity, RandFlip
+    RandAdjustContrast, RandAffine, Identity, RandFlip, NormalizeIntensity
 )
 from torch.utils.data import DataLoader
 from classification.dataloader import ScanDataset, MRNDataset, MacOpDataset, HiroshiScan
@@ -67,7 +67,10 @@ class GlaucomaModel(L.LightningModule):
         metric_names = ["acc", "f1", "auroc", "spec", "sens", "auprc"]
         
         for metric, name in zip(metrics, metric_names):
-            metric(preds, y)
+            if name in ["auroc", "auprc"]:
+                metric(logits, y)
+            else:
+                metric(preds, y)
             self.log(f"{stage}_{name}", metric, on_epoch=True, sync_dist=True, logger=True)
         
         return loss
@@ -130,25 +133,10 @@ class OCTDataModule(L.LightningDataModule):
 
     def setup(self, stage=None):
         prob, dataset_name, split_name = self.hparams.prob, self.hparams.dataset_name, self.hparams.split_name
-        # transform = OneOf([
-            # Compose([
+        train_transform = Compose([
                 # RandGaussianNoise(prob=prob, std=0.01 if dataset_name == "Hiroshi" else 1),
                 # RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if dataset_name == "Hiroshi" else (1, 4)),
                 # RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if dataset_name == "Hiroshi" else 1),
-                # RandAffine(
-                #     prob=prob, translate_range=(5, 5, 0) if dataset_name == "Hiroshi" else (15, 10, 0),
-                    # rotate_range=(0.01, 0, 0) if dataset_name == "Hiroshi" else (0.02, 0, 0),
-                    # scale_range=((-.1, .1), 0, 0) if dataset_name == "Hiroshi" else ((-.1, .4), 0, 0),
-                    # padding_mode="zeros"
-                # ),
-            #     RandFlip(spatial_axis=0, prob=prob),
-            #     RandFlip(spatial_axis=1, prob=prob)
-            # ]), Identity()], weights=[prob, 1 - prob])
-
-        transform = Compose([
-                RandGaussianNoise(prob=prob, std=0.01 if dataset_name == "Hiroshi" else 1),
-                RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if dataset_name == "Hiroshi" else (1, 4)),
-                RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if dataset_name == "Hiroshi" else 1),
                 RandAffine(
                     prob=prob, translate_range=(5, 5, 0) if dataset_name == "Hiroshi" else (15, 10, 0),
                     rotate_range=(0.01, 0, 0) if dataset_name == "Hiroshi" else (0.02, 0, 0),
@@ -158,19 +146,39 @@ class OCTDataModule(L.LightningDataModule):
                 RandFlip(spatial_axis=0, prob=prob),
                 RandFlip(spatial_axis=1, prob=prob)
             ])
+        
+        val_transform = None
+        test_transform = None 
+        
+        # train_transform = Compose([
+        #         # RandGaussianNoise(prob=prob, std=0.01 if dataset_name == "Hiroshi" else 1),
+        #         # RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if dataset_name == "Hiroshi" else (1, 4)),
+        #         # RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if dataset_name == "Hiroshi" else 1),
+        #         RandAffine(
+        #             prob=prob, translate_range=(5, 5, 0) if dataset_name == "Hiroshi" else (15, 10, 0),
+        #             rotate_range=(0.01, 0, 0) if dataset_name == "Hiroshi" else (0.02, 0, 0),
+        #             scale_range=((-.1, .1), 0, 0) if dataset_name == "Hiroshi" else ((-.1, .4), 0, 0),
+        #             padding_mode="zeros"
+        #         ),
+        #         RandFlip(spatial_axis=0, prob=prob),
+        #         RandFlip(spatial_axis=1, prob=prob),
+        #         NormalizeIntensity(nonzero=True)
+        #     ])
+        # val_transform = Compose([NormalizeIntensity(nonzero=True)])
+        # test_transform = Compose([NormalizeIntensity(nonzero=True)])
 
         DatasetClass = {
             "Macop": MacOpDataset, "Hiroshi": HiroshiScan
         }.get(dataset_name, MRNDataset if self.hparams.mrn_mode else ScanDataset)
 
-        self.train_dataset = DatasetClass(dataset_name, split_name, self.training_data, transform, 
+        self.train_dataset = DatasetClass(dataset_name, split_name, self.training_data, train_transform, 
                                           self.hparams.image_size, self.hparams.add_denoise,
                                           self.hparams.contrastive_mode, self.hparams.imbalance_factor)
-        self.val_dataset = DatasetClass(dataset_name, split_name, ["val"], transform,
+        self.val_dataset = DatasetClass(dataset_name, split_name, ["val"], val_transform,
                                         self.hparams.image_size, self.hparams.add_denoise,
                                         self.hparams.contrastive_mode, self.hparams.imbalance_factor)
         if stage == "test" or not self.hparams.tv:
-            self.test_dataset = DatasetClass(dataset_name, split_name, ["test"], transform,
+            self.test_dataset = DatasetClass(dataset_name, split_name, ["test"], test_transform,
                                              self.hparams.image_size, self.hparams.add_denoise,
                                              self.hparams.contrastive_mode, self.hparams.imbalance_factor)
 
