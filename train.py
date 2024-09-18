@@ -1,7 +1,6 @@
 import os
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from monai.transforms import (
     Compose, OneOf, RandGaussianNoise, RandScaleIntensity, 
     RandAdjustContrast, RandAffine, Identity, RandFlip, NormalizeIntensity
@@ -16,7 +15,6 @@ import wandb
 from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR
 from datetime import datetime
 import lightning as L
-from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch import Trainer
 from lightning.pytorch.cli import LightningCLI
 
@@ -90,25 +88,26 @@ class GlaucomaModel(L.LightningModule):
         return self.validation_step(batch, batch_idx, dataloader_idx=1)
 
     def configure_optimizers(self):
-        if self.hparams.opt == "Adam":
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
-        elif self.hparams.opt == "AdamW":
-            optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
-        elif self.hparams.opt == "NAdam":
-            optimizer = torch.optim.NAdam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+        optimizer_class = {
+            "Adam": torch.optim.Adam,
+            "AdamW": torch.optim.AdamW,
+            "NAdam": torch.optim.NAdam
+        }.get(self.hparams.opt, torch.optim.Adam)
+
+        optimizer = optimizer_class(
+            self.parameters(),
+            lr=self.hparams.lr,
+            weight_decay=self.hparams.weight_decay
+        )
+
         if self.hparams.cos_anneal > 0:
             scheduler = CosineAnnealingLR(optimizer, T_max=self.hparams.cos_anneal)
-            return {
-                'optimizer': optimizer,
-                'lr_scheduler': scheduler
-            }
+            return {'optimizer': optimizer, 'lr_scheduler': scheduler}
         elif self.hparams.step_decay > 0:
             scheduler = StepLR(optimizer, step_size=self.hparams.step_decay)
-            return {
-                'optimizer': optimizer,
-                'lr_scheduler': scheduler
-            }
-        return optimizer
+            return {'optimizer': optimizer, 'lr_scheduler': scheduler}
+        else:
+            return optimizer
 
 
 class OCTDataModule(L.LightningDataModule):
