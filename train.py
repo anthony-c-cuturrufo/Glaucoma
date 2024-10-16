@@ -25,11 +25,23 @@ class CustomLightningCLI(LightningCLI):
         model_config, data_config, trainer_config = self.config.fit.model, self.config.fit.data, self.config.fit.trainer
         current_time = datetime.now().strftime("%Y%m%d_%H%M")
         image_size = '_'.join(map(str, model_config.image_size))
-        custom_name = (f"{model_config.model_name}d{model_config.dropout}b{data_config.batch_size}"
+        add_D = "_add" if data_config.add_denoise else ""
+        post_norm = "_pn" if data_config.post_norm else ""
+        dall = "_dall" if data_config.denoise_all else ""
+        custom_name = (f"{model_config.model_name}d{model_config.dropout}b{data_config.batch_size}{add_D}{post_norm}{dall}"
                        f"lr{model_config.lr}img{image_size}_{current_time}{model_config.contrastive_mode}"
                        f"{data_config.dataset_name}b_acc{trainer_config.accumulate_grad_batches}{data_config.split_name}")
         self.config.fit.trainer.logger.init_args.name = custom_name
+        self.config.fit.trainer.default_root_dir = os.path.join("/local2/acc/Glaucoma/logs", custom_name)
+        self.config.fit.trainer.callbacks[0].init_args.dirpath = self.config.fit.trainer.default_root_dir
         super().before_instantiate_classes()
+
+    def after_fit(self):
+        best_ckpt_path = self.trainer.checkpoint_callback.best_model_path
+        if best_ckpt_path:
+            self.trainer.test(ckpt_path=best_ckpt_path, datamodule=self.datamodule)
+        else:
+            print("No best checkpoint available, skipping testing.")
 
 
 class GlaucomaModel(L.LightningModule):
@@ -37,9 +49,7 @@ class GlaucomaModel(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.model = model_factory(**kwargs)
-        # self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([self.hparams.pos_weight]))
-        self.loss_fn = torch.nn.BCEWithLogitsLoss()
-
+        self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([self.hparams.pos_weight]))
         metric_classes = [
             Accuracy, F1Score, AUROC, Specificity, Recall, AveragePrecision
         ]
@@ -124,7 +134,9 @@ class OCTDataModule(L.LightningDataModule):
         add_denoise=True, 
         num_classes=1, 
         mrn_mode=False, 
-        imbalance_factor=-1
+        imbalance_factor=-1,
+        post_norm=False,
+        denoise_all=True
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -132,61 +144,63 @@ class OCTDataModule(L.LightningDataModule):
 
     def setup(self, stage=None):
         prob, dataset_name, split_name = self.hparams.prob, self.hparams.dataset_name, self.hparams.split_name
-        train_transform = Compose([
-                # RandGaussianNoise(prob=prob, std=0.01 if dataset_name == "Hiroshi" else 1),
-                # RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if dataset_name == "Hiroshi" else (1, 4)),
-                # RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if dataset_name == "Hiroshi" else 1),
+        if self.hparams.post_norm:
+            train_transform = Compose([
+                    # RandGaussianNoise(prob=prob, std=0.01 if "Hiroshi" in dataset_name else 1),
+                    # RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if "Hiroshi" in dataset_name else (1, 4)),
+                    RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if "Hiroshi" in dataset_name else 1),
+                    RandAffine(
+                        prob=prob, translate_range=(5, 5, 0) if "Hiroshi" in dataset_name else (15, 10, 0),
+                        rotate_range=(0.01, 0, 0) if "Hiroshi" in dataset_name else (0.02, 0, 0),
+                        scale_range=((-.1, .1), 0, 0) if "Hiroshi" in dataset_name else ((-.1, .4), 0, 0),
+                        padding_mode="zeros"
+                    ),
+                    RandFlip(spatial_axis=0, prob=prob),
+                    RandFlip(spatial_axis=1, prob=prob),
+                    NormalizeIntensity(nonzero=True)
+                ])
+            val_transform = Compose([NormalizeIntensity(nonzero=True)])
+            test_transform = Compose([NormalizeIntensity(nonzero=True)])   
+        else:
+            train_transform = Compose([
+                # RandGaussianNoise(prob=prob, std=0.01 if "Hiroshi" in dataset_name else 1),
+                # RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if "Hiroshi" in dataset_name else (1, 4)),
+                RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if "Hiroshi" in dataset_name else 1),
                 RandAffine(
-                    prob=prob, translate_range=(5, 5, 0) if dataset_name == "Hiroshi" else (15, 10, 0),
-                    rotate_range=(0.01, 0, 0) if dataset_name == "Hiroshi" else (0.02, 0, 0),
-                    scale_range=((-.1, .1), 0, 0) if dataset_name == "Hiroshi" else ((-.1, .4), 0, 0),
+                    prob=prob, translate_range=(5, 5, 0) if "Hiroshi" in dataset_name else (15, 10, 0),
+                    rotate_range=(0.01, 0, 0) if "Hiroshi" in dataset_name else (0.02, 0, 0),
+                    scale_range=((-.1, .1), 0, 0) if "Hiroshi" in dataset_name else ((-.1, .4), 0, 0),
                     padding_mode="zeros"
                 ),
                 RandFlip(spatial_axis=0, prob=prob),
                 RandFlip(spatial_axis=1, prob=prob)
             ])
         
-        val_transform = None
-        test_transform = None 
-        
-        # train_transform = Compose([
-        #         # RandGaussianNoise(prob=prob, std=0.01 if dataset_name == "Hiroshi" else 1),
-        #         # RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if dataset_name == "Hiroshi" else (1, 4)),
-        #         # RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if dataset_name == "Hiroshi" else 1),
-        #         RandAffine(
-        #             prob=prob, translate_range=(5, 5, 0) if dataset_name == "Hiroshi" else (15, 10, 0),
-        #             rotate_range=(0.01, 0, 0) if dataset_name == "Hiroshi" else (0.02, 0, 0),
-        #             scale_range=((-.1, .1), 0, 0) if dataset_name == "Hiroshi" else ((-.1, .4), 0, 0),
-        #             padding_mode="zeros"
-        #         ),
-        #         RandFlip(spatial_axis=0, prob=prob),
-        #         RandFlip(spatial_axis=1, prob=prob),
-        #         NormalizeIntensity(nonzero=True)
-        #     ])
-        # val_transform = Compose([NormalizeIntensity(nonzero=True)])
-        # test_transform = Compose([NormalizeIntensity(nonzero=True)])
+            val_transform = None
+            test_transform = None 
 
         DatasetClass = {
             "Macop": MacOpDataset, "Hiroshi": HiroshiScan
-        }.get(dataset_name, MRNDataset if self.hparams.mrn_mode else ScanDataset)
+        }.get(dataset_name[:-1], MRNDataset if self.hparams.mrn_mode else ScanDataset)
 
         self.train_dataset = DatasetClass(dataset_name, split_name, self.training_data, train_transform, 
                                           self.hparams.image_size, self.hparams.add_denoise,
-                                          self.hparams.contrastive_mode, self.hparams.imbalance_factor)
+                                          self.hparams.contrastive_mode, self.hparams.imbalance_factor,
+                                          self.hparams.post_norm, self.hparams.denoise_all)
         self.val_dataset = DatasetClass(dataset_name, split_name, ["val"], val_transform,
                                         self.hparams.image_size, self.hparams.add_denoise,
-                                        self.hparams.contrastive_mode, self.hparams.imbalance_factor)
-        if stage == "test" or not self.hparams.tv:
-            self.test_dataset = DatasetClass(dataset_name, split_name, ["test"], test_transform,
-                                             self.hparams.image_size, self.hparams.add_denoise,
-                                             self.hparams.contrastive_mode, self.hparams.imbalance_factor)
+                                        self.hparams.contrastive_mode, self.hparams.imbalance_factor,
+                                        self.hparams.post_norm, self.hparams.denoise_all)
+        self.test_dataset = DatasetClass(dataset_name, split_name, ["test"], test_transform,
+                                            self.hparams.image_size, self.hparams.add_denoise,
+                                            self.hparams.contrastive_mode, self.hparams.imbalance_factor,
+                                            self.hparams.post_norm, self.hparams.denoise_all)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=True)
 
     def val_dataloader(self):
-        return [DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=False),
-                DataLoader(self.test_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=False)] if not self.hparams.tv else DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=False)
+        return DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=False)
 
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=False)

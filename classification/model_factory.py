@@ -220,7 +220,7 @@ def model_factory(
     dropout=.2, 
     num_classes=2, 
     contrastive_mode = "None", 
-    contrastive_layer_size = 128,
+    contrastive_layer_size = 32,
     conv_layers = [32,64], 
     fc_layers = [16], 
     pretrained=True, 

@@ -302,9 +302,13 @@ class HiroshiMRN(Dataset):
         return idx
 
 class HiroshiScan(Dataset):
-    def __init__(self, dataset_name, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor):
+    def __init__(self, dataset_name, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor, post_norm=False, denoise_all=False):
+        if denoise_all:
+            assert add_denoise
+        self.post_norm = post_norm
+        self.denoise_all = denoise_all
         self.split = split
-        temp = pd.read_csv('/home/acc/Glaucoma/Glaucoma/data/hiroshi_dataset_splits.csv')
+        temp = pd.read_csv(f'/home/acc/Glaucoma/Glaucoma/data/{dataset_name}.csv')
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
 
         # if imbalance_factor != -1 and "train" in split:
@@ -324,9 +328,12 @@ class HiroshiScan(Dataset):
     def get_data(self):
         numpy_arrays = [np.load(row['filepaths']).astype(np.float32)[np.newaxis, ...] for _, row in self.df.iterrows()]
         stacked_array = np.transpose(np.stack(numpy_arrays), (0, 1, 3, 4, 2))
-        normalize = NormalizeIntensity(nonzero=True)
-        normalized_array = normalize(stacked_array)
-        return torch.from_numpy(normalized_array.numpy())
+        if self.post_norm:
+            return torch.from_numpy(stacked_array)
+        else:
+            normalize = NormalizeIntensity(nonzero=True)
+            normalized_array = normalize(stacked_array)
+            return torch.from_numpy(normalized_array.numpy())
     
     def get_denoised(self):
         denoised_images = []
@@ -342,15 +349,18 @@ class HiroshiScan(Dataset):
                 raise FileNotFoundError(f"Segmented file not found for {filename}")
 
         stacked_denoised_array = np.transpose(np.stack(denoised_images), (0, 1, 3, 4, 2))
-        normalize = NormalizeIntensity(nonzero=True)
-        normalized_denoised_array = normalize(stacked_denoised_array)
-        return torch.from_numpy(normalized_denoised_array.numpy())
+        if self.post_norm:
+            return torch.from_numpy(stacked_denoised_array)
+        else:
+            normalize = NormalizeIntensity(nonzero=True)
+            normalized_denoised_array = normalize(stacked_denoised_array)
+            return torch.from_numpy(normalized_denoised_array.numpy())
     
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, idx):
-        use_denoised = self.denoised_data is not None and "train" in self.split and random.random() < 0.3 and self.contrastive_mode != "Denoise"
+        use_denoised = (self.denoised_data is not None and "train" in self.split and random.random() < 0.3 and self.contrastive_mode != "Denoise") or (self.denoise_all and self.denoised_data is not None)
         scan = self.denoised_data[idx] if use_denoised else self.data[idx]
 
         if self.transform:
