@@ -302,11 +302,14 @@ class HiroshiMRN(Dataset):
         return idx
 
 class HiroshiScan(Dataset):
-    def __init__(self, dataset_name, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor, post_norm=False, denoise_all=False):
-        if denoise_all:
-            assert add_denoise
+    def __init__(self, dataset_name, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor, post_norm=False, denoise_all=False, denoise_prob=.4, transform_denoise=False):
+        if denoise_all: assert add_denoise
+        assert not (add_denoise and contrastive_mode=="Denoise")
         self.post_norm = post_norm
+        self.add_denoise = add_denoise
         self.denoise_all = denoise_all
+        self.denoise_prob = denoise_prob
+        self.transform_denoise = transform_denoise
         self.split = split
         temp = pd.read_csv(f'/home/acc/Glaucoma/Glaucoma/data/{dataset_name}.csv')
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
@@ -359,12 +362,13 @@ class HiroshiScan(Dataset):
     def __len__(self):
         return len(self.df)
 
-    def __getitem__(self, idx):
-        use_denoised = (self.denoised_data is not None and "train" in self.split and random.random() < 0.3 and self.contrastive_mode != "Denoise") or (self.denoise_all and self.denoised_data is not None)
+    def __getitem__(self, idx):            
+        use_denoised = (self.add_denoise and "train" in self.split and torch.rand(1).item() < self.denoise_prob) or ("train" not in self.split and self.denoise_all)
         scan = self.denoised_data[idx] if use_denoised else self.data[idx]
 
         if self.transform:
-            scan = self.transform(scan)
+            if not use_denoised or (use_denoised and self.transform_denoise):
+                scan = self.transform(scan)
 
         if self.contrastive_mode == "None":
             data_point = {

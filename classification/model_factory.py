@@ -7,6 +7,8 @@ from monai.networks.nets import SENet
 from monai.networks.blocks.squeeze_and_excitation import SEResNeXtBottleneck
 from classification.nilay_model import dual_paths
 from classification.dual_vit import DualViT
+from classification.DenseNet3D_Weight_Transfer_2D_to_3D import densenet121_3D
+
 
 class OCT3DCNNEncoder(nn.Module):
     def __init__(self, num_classes=1, in_channels=1, dropout_rate=.2):  # Adjust 'num_classes' based on your specific task
@@ -370,9 +372,11 @@ def model_factory(
             model = ResNetWrapper(
                 model_name,
                 dropout_prob=dropout,
+                freeze=freeze,
+                fc_layers=fc_layers,
+                num_classes=n_classes, 
                 spatial_dims=3,
                 n_input_channels=1,
-                num_classes=n_classes, 
                 pretrained=True,
                 feed_forward=False, 
                 shortcut_type="A",
@@ -383,6 +387,8 @@ def model_factory(
                 spatial_dims=3,
                 n_input_channels=1,
                 num_classes=n_classes)
+    elif model_name == "DenseNet":
+        model = densenet121_3D(pre_trained = True, num_classes = 1)
     elif model_name == "DualViT":
         assert contrastive_mode != "None"
         model = DualViT(

@@ -5,7 +5,7 @@ from monai.transforms import (
     Compose, OneOf, RandGaussianNoise, RandScaleIntensity, 
     RandAdjustContrast, RandAffine, Identity, RandFlip, NormalizeIntensity
 )
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from classification.dataloader import ScanDataset, MRNDataset, MacOpDataset, HiroshiScan
 from classification.model_factory import model_factory
 from torchmetrics.classification import (
@@ -15,20 +15,22 @@ import wandb
 from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR
 from datetime import datetime
 import lightning as L
-from lightning.pytorch import Trainer
+from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.cli import LightningCLI
 
 
 class CustomLightningCLI(LightningCLI):
     def before_instantiate_classes(self):
         torch.set_float32_matmul_precision('medium')
+        print(self.config)
         model_config, data_config, trainer_config = self.config.fit.model, self.config.fit.data, self.config.fit.trainer
         current_time = datetime.now().strftime("%Y%m%d_%H%M")
         image_size = '_'.join(map(str, model_config.image_size))
         add_D = "_add" if data_config.add_denoise else ""
         post_norm = "_pn" if data_config.post_norm else ""
         dall = "_dall" if data_config.denoise_all else ""
-        custom_name = (f"{model_config.model_name}d{model_config.dropout}b{data_config.batch_size}{add_D}{post_norm}{dall}"
+        ws = "_ws" if data_config.weighted_sampling else ""
+        custom_name = (f"{model_config.model_name}d{model_config.dropout}b{data_config.batch_size}{add_D}{post_norm}{dall}{ws}"
                        f"lr{model_config.lr}img{image_size}_{current_time}{model_config.contrastive_mode}"
                        f"{data_config.dataset_name}b_acc{trainer_config.accumulate_grad_batches}{data_config.split_name}")
         self.config.fit.trainer.logger.init_args.name = custom_name
@@ -136,7 +138,10 @@ class OCTDataModule(L.LightningDataModule):
         mrn_mode=False, 
         imbalance_factor=-1,
         post_norm=False,
-        denoise_all=True
+        denoise_all=True,
+        denoise_prob=.4, 
+        transform_denoise=True,
+        weighted_sampling=False
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -158,7 +163,7 @@ class OCTDataModule(L.LightningDataModule):
                     RandFlip(spatial_axis=0, prob=prob),
                     RandFlip(spatial_axis=1, prob=prob),
                     NormalizeIntensity(nonzero=True)
-                ])
+                ]).set_random_state(seed=1)
             val_transform = Compose([NormalizeIntensity(nonzero=True)])
             test_transform = Compose([NormalizeIntensity(nonzero=True)])   
         else:
@@ -174,7 +179,7 @@ class OCTDataModule(L.LightningDataModule):
                 ),
                 RandFlip(spatial_axis=0, prob=prob),
                 RandFlip(spatial_axis=1, prob=prob)
-            ])
+            ]).set_random_state(seed=1)
         
             val_transform = None
             test_transform = None 
@@ -186,17 +191,28 @@ class OCTDataModule(L.LightningDataModule):
         self.train_dataset = DatasetClass(dataset_name, split_name, self.training_data, train_transform, 
                                           self.hparams.image_size, self.hparams.add_denoise,
                                           self.hparams.contrastive_mode, self.hparams.imbalance_factor,
-                                          self.hparams.post_norm, self.hparams.denoise_all)
+                                          self.hparams.post_norm, self.hparams.denoise_all,
+                                          self.hparams.denoise_prob, self.hparams.transform_denoise)
         self.val_dataset = DatasetClass(dataset_name, split_name, ["val"], val_transform,
                                         self.hparams.image_size, self.hparams.add_denoise,
                                         self.hparams.contrastive_mode, self.hparams.imbalance_factor,
-                                        self.hparams.post_norm, self.hparams.denoise_all)
+                                        self.hparams.post_norm, self.hparams.denoise_all,
+                                        self.hparams.denoise_prob, self.hparams.transform_denoise)
         self.test_dataset = DatasetClass(dataset_name, split_name, ["test"], test_transform,
                                             self.hparams.image_size, self.hparams.add_denoise,
                                             self.hparams.contrastive_mode, self.hparams.imbalance_factor,
-                                            self.hparams.post_norm, self.hparams.denoise_all)
+                                            self.hparams.post_norm, self.hparams.denoise_all,
+                                            self.hparams.denoise_prob, self.hparams.transform_denoise)
 
     def train_dataloader(self):
+        if self.hparams.weighted_sampling:
+            targets = [self.train_dataset[i]['target'] for i in range(len(self.train_dataset))]
+            targets = torch.tensor(targets).long()
+            class_counts = torch.bincount(targets)
+            class_weights = 1.0 / class_counts.float()
+            sample_weights = [class_weights[target] for target in targets]
+            sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
+            return DataLoader(self.train_dataset, batch_size=self.hparams.batch_size, sampler=sampler, num_workers=self.hparams.num_workers)
         return DataLoader(self.train_dataset, batch_size=self.hparams.batch_size, num_workers=self.hparams.num_workers, shuffle=True)
 
     def val_dataloader(self):
@@ -207,6 +223,7 @@ class OCTDataModule(L.LightningDataModule):
 
 
 def cli_main():
+    seed_everything(1, workers=True)
     cli = CustomLightningCLI(GlaucomaModel, OCTDataModule, save_config_kwargs={"overwrite": True})
 
 
