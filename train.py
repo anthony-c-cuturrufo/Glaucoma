@@ -47,7 +47,7 @@ class CustomLightningCLI(LightningCLI):
 
 
 class GlaucomaModel(L.LightningModule):
-    def __init__(self, lr=1e-5, weight_decay=1e-2, cos_anneal=-1, step_decay=-1, pos_weight=1, opt="Adam", **kwargs):
+    def __init__(self, lr=1e-5, weight_decay=1e-2, cos_anneal=-1, step_decay=-1, pos_weight=1, eps=1e-8, opt="Adam", **kwargs):
         super().__init__()
         self.save_hyperparameters()
         self.model = model_factory(**kwargs)
@@ -109,7 +109,8 @@ class GlaucomaModel(L.LightningModule):
         optimizer = optimizer_class(
             self.parameters(),
             lr=self.hparams.lr,
-            weight_decay=self.hparams.weight_decay
+            weight_decay=self.hparams.weight_decay,
+            eps=self.hparams.eps
         )
 
         if self.hparams.cos_anneal > 0:
