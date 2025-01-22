@@ -158,6 +158,9 @@ class ResNetWrapper(nn.Module):
 class ContrastiveWrapper(nn.Module):
     def __init__(self, base_model, contrastive_layer_size, num_classes, dropout_rate, join_method='concat'):
         super(ContrastiveWrapper, self).__init__()
+        print("contrastive_layer_size", contrastive_layer_size)
+        print("join_method", join_method)
+
         self.base_model = base_model
         self.join_method = join_method
         self.relu = nn.ReLU()
@@ -234,6 +237,7 @@ def model_factory(
     num_l=12,
     num_h=12,
     qkv=False,
+    join_method = "concat"
 ):
     n_classes = contrastive_layer_size if contrastive_mode != "None" and model_name != "DualViT" else num_classes
     if model_name == "3DCNN":
@@ -416,7 +420,7 @@ def model_factory(
     if contrastive_mode != "None" and model_name != "DualViT":
         if use_dual_paths:
             return dual_paths(model, num_classes, dropout)
-        return ContrastiveWrapper(model, contrastive_layer_size, num_classes, dropout_rate=dropout)
+        return ContrastiveWrapper(model, contrastive_layer_size, num_classes, dropout_rate=dropout, join_method=join_method)
     else:
         return model 
     

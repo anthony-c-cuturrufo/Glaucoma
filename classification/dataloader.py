@@ -7,6 +7,7 @@ import os
 from classification.dataloader_utils import process_scan, adjust_filepath
 import random
 from monai.transforms import NormalizeIntensity
+import re
 
 class ScanDataset(Dataset):
     def __init__(self, fp, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor):
@@ -305,14 +306,19 @@ class HiroshiScan(Dataset):
     def __init__(self, dataset_name, split_name, split, transform, image_size, add_denoise, contrastive_mode, imbalance_factor, post_norm=False, denoise_all=False, denoise_prob=.4, transform_denoise=False):
         if denoise_all: assert add_denoise
         assert not (add_denoise and contrastive_mode=="Denoise")
+        assert not (denoise_all and contrastive_mode=="Denoise")
+
         self.post_norm = post_norm
         self.add_denoise = add_denoise
         self.denoise_all = denoise_all
         self.denoise_prob = denoise_prob
         self.transform_denoise = transform_denoise
         self.split = split
+        self.image_size = image_size
         temp = pd.read_csv(f'/home/acc/Glaucoma/Glaucoma/data/{dataset_name}.csv')
         self.df = temp[temp[split_name].isin(split)].reset_index(drop=True)
+        self.dataset_name = re.sub(r'\d+|_og', '', dataset_name)
+
 
         # if imbalance_factor != -1 and "train" in split:
         #     N = min(len(self.df[self.df.classification == 0]), len(self.df[self.df.classification == 1])) 
@@ -329,29 +335,48 @@ class HiroshiScan(Dataset):
         self.targets = torch.tensor(self.df.classification.values[:, np.newaxis], dtype=torch.float32)
 
     def get_data(self):
-        numpy_arrays = [np.load(row['filepaths']).astype(np.float32)[np.newaxis, ...] for _, row in self.df.iterrows()]
-        stacked_array = np.transpose(np.stack(numpy_arrays), (0, 1, 3, 4, 2))
+        if "Hiroshi" in self.dataset_name:
+            numpy_arrays = [np.load(row['filepaths']).astype(np.float32)[np.newaxis, ...] for _, row in self.df.iterrows()]
+            stacked_array = np.transpose(np.stack(numpy_arrays), (0, 1, 3, 4, 2))
+        else:
+            numpy_arrays = [np.load(os.path.join(f"/local2/acc/Glaucoma/{self.dataset_name}/{self.image_size[0]}-{self.image_size[1]}-{self.image_size[2]}/OCT", os.path.basename(row['filepaths']).replace(".img", ".npy")))[np.newaxis, ...] for _, row in self.df.iterrows()]
+            stacked_array = np.stack(numpy_arrays)
         if self.post_norm:
             return torch.from_numpy(stacked_array)
         else:
             normalize = NormalizeIntensity(nonzero=True)
             normalized_array = normalize(stacked_array)
             return torch.from_numpy(normalized_array.numpy())
-    
+
+    # Macular & Optic - 1024x200x200 masks are saved as uint8, all other are float32
     def get_denoised(self):
         denoised_images = []
-        base_path = "/local2/acc/Glaucoma/Hiroshi_ONH_OCT_seg"
-        
-        for _, row in self.df.iterrows():
-            filename = os.path.basename(row['filepaths'])
-            denoised_filepath = os.path.join(base_path, filename.replace('.npy', '_seg.npy'))
-            if os.path.exists(denoised_filepath):
-                denoised_image = np.load(denoised_filepath).astype(np.float32)[np.newaxis, ...]
-                denoised_images.append(denoised_image)
-            else:
-                raise FileNotFoundError(f"Segmented file not found for {filename}")
 
-        stacked_denoised_array = np.transpose(np.stack(denoised_images), (0, 1, 3, 4, 2))
+        if "Hiroshi" in self.dataset_name:
+            base_path = "/local2/acc/Glaucoma/Hiroshi_ONH_OCT_seg"
+            for _, row in self.df.iterrows():
+                filename = os.path.basename(row['filepaths'])
+                denoised_filepath = os.path.join(base_path, filename.replace('.npy', '_seg.npy'))
+                if os.path.exists(denoised_filepath):
+                    denoised_image = np.load(denoised_filepath).astype(np.float32)[np.newaxis, ...]
+                    denoised_images.append(denoised_image)
+                else:
+                    raise FileNotFoundError(f"Segmented file not found for {filename}")
+
+            stacked_denoised_array = np.transpose(np.stack(denoised_images), (0, 1, 3, 4, 2))
+        else:
+            base_path = f"/local2/acc/Glaucoma/{self.dataset_name}/{self.image_size[0]}-{self.image_size[1]}-{self.image_size[2]}/Macular_seg"
+            for _, row in self.df.iterrows():
+                filename = os.path.basename(row['filepaths'])
+                denoised_filepath = os.path.join(base_path, filename.replace('.img', '_seg.npy'))
+                if os.path.exists(denoised_filepath):
+                    denoised_image = np.load(denoised_filepath).astype(np.float32)[np.newaxis, ...]
+                    denoised_images.append(denoised_image)
+                else:
+                    raise FileNotFoundError(f"Segmented file not found for {filename}")
+
+            stacked_denoised_array = np.stack(denoised_images)
+
         if self.post_norm:
             return torch.from_numpy(stacked_denoised_array)
         else:
@@ -378,7 +403,7 @@ class HiroshiScan(Dataset):
         else:
             data_point = {
                 "data": scan,
-                "aux": self.denoised_data[idx],
+                "aux": self.transform(self.denoised_data[idx]) if (self.transform and self.transform_denoise) else self.denoised_data[idx],
                 "target": self.targets[idx]
             }
         return data_point
