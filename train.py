@@ -152,13 +152,13 @@ class OCTDataModule(L.LightningDataModule):
         prob, dataset_name, split_name = self.hparams.prob, self.hparams.dataset_name, self.hparams.split_name
         if self.hparams.post_norm:
             train_transform = Compose([
-                    # RandGaussianNoise(prob=prob, std=0.01 if True else 1),
-                    # RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if True else (1, 4)),
-                    RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if True else 1),
+                    # RandGaussianNoise(prob=prob, std=0.01),
+                    # RandScaleIntensity(prob=prob, factors=(0.9, 1.1)),
+                    RandAdjustContrast(prob=prob, gamma=(0.9, 1.1)),
                     RandAffine(
-                        prob=prob, translate_range=(5, 5, 0) if True else (15, 10, 0),
-                        rotate_range=(0.01, 0, 0) if True else (0.02, 0, 0),
-                        scale_range=((-.1, .1), 0, 0) if True else ((-.1, .4), 0, 0),
+                        prob=prob, translate_range=(5, 5, 0),
+                        rotate_range=(0.01, 0, 0),
+                        scale_range=((-.1, .1), 0, 0),
                         padding_mode="zeros"
                     ),
                     RandFlip(spatial_axis=0, prob=prob),
@@ -169,13 +169,13 @@ class OCTDataModule(L.LightningDataModule):
             test_transform = Compose([NormalizeIntensity(nonzero=True)])   
         else:
             train_transform = Compose([
-                # RandGaussianNoise(prob=prob, std=0.01 if True else 1),
-                # RandScaleIntensity(prob=prob, factors=(0.9, 1.1) if True else (1, 4)),
-                RandAdjustContrast(prob=prob, gamma=(0.9, 1.1) if True else 1),
+                # RandGaussianNoise(prob=prob, std=0.01),
+                # RandScaleIntensity(prob=prob, factors=(0.9, 1.1)),
+                RandAdjustContrast(prob=prob, gamma=(0.9, 1.1)),
                 RandAffine(
-                    prob=prob, translate_range=(5, 5, 0) if True else (15, 10, 0),
-                    rotate_range=(0.01, 0, 0) if True else (0.02, 0, 0),
-                    scale_range=((-.1, .1), 0, 0) if True else ((-.1, .4), 0, 0),
+                    prob=prob, translate_range=(5, 5, 0),
+                    rotate_range=(0.01, 0, 0) ,
+                    scale_range=((-.1, .1), 0, 0),
                     padding_mode="zeros"
                 ),
                 RandFlip(spatial_axis=0, prob=prob),

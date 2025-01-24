@@ -92,18 +92,34 @@ class Efficient3DCNN(nn.Module):
         x = self.fc_layers(x)
         return x
 
+class SimCLRLoss(nn.Module):
+    def __init__(self, temperature=0.5):
+        super(SimCLRLoss, self).__init__()
+        self.temperature = temperature
 
+    def forward(self, z_i, z_j):
+        batch_size = z_i.shape[0]
 
-#this loss function is based off of this paper https://github.com/binh234/facial-liveness-detection/blob/main/train.ipynb
-class ContrastiveLoss(torch.nn.Module):
-    def __init__(self, margin=1.0):
-        super(ContrastiveLoss, self).__init__()
-        self.margin = margin
-    def forward(self, output1, output2, label):  #output1 is the first embedding #output2 is the second embedding #label for our case will always be 0 "Similar" becaause they are mere augmentations of each other
-        euclidean_distance = F.pairwise_distance(output1, output2, keepdim=True) #first compute the euclidian distance between the two
-        loss_contrastive = torch.mean(torch.pow(euclidean_distance, 2)) 
-        #+ (label) * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2)) #we only need this line of code if we had dissimilar embeddings but they hshould always be similar because they both have glaucoma or not
-        return loss_contrastive
+        # Normalize embeddings
+        z_i = F.normalize(z_i, dim=1)
+        z_j = F.normalize(z_j, dim=1)
+
+        # Concatenate embeddings
+        embeddings = torch.cat([z_i, z_j], dim=0)
+
+        # Compute similarity matrix
+        similarity_matrix = torch.matmul(embeddings, embeddings.T) / self.temperature
+
+        # Create labels
+        labels = torch.arange(batch_size).repeat(2).to(z_i.device)
+
+        # Mask out self-similarity
+        mask = torch.eye(batch_size * 2).bool().to(z_i.device)
+        similarity_matrix = similarity_matrix[~mask].view(batch_size * 2, -1)
+
+        # Compute loss
+        loss = F.cross_entropy(similarity_matrix, labels)
+        return loss
 
 class ViTWrapper(nn.Module):
     def __init__(self, *args, **kwargs):
@@ -155,9 +171,9 @@ class ResNetWrapper(nn.Module):
         output = self.fc_layers(output)
         return output
     
-class ContrastiveWrapper(nn.Module):
+class SiameseeWrapper(nn.Module):
     def __init__(self, base_model, contrastive_layer_size, num_classes, dropout_rate, join_method='concat'):
-        super(ContrastiveWrapper, self).__init__()
+        super(SiameseeWrapper, self).__init__()
         print("contrastive_layer_size", contrastive_layer_size)
         print("join_method", join_method)
 
@@ -191,6 +207,46 @@ class ContrastiveWrapper(nn.Module):
         output = self.fc(output)
 
         return output
+
+class ContrastiveWrapper(nn.Module):
+    def __init__(self, base_model, embedding_dim):
+        super(ContrastiveWrapper, self).__init__()
+        self.base_model = base_model
+        self.projector = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.ReLU(),
+            nn.Linear(embedding_dim, embedding_dim)
+        )
+
+    def forward(self, x1, x2=None):
+        embedding_1 = self.projector(self.base_model(x1))
+        if x2 is not None:
+            embedding_2 = self.projector(self.base_model(x2))
+            return embedding_1, embedding_2
+        return embedding_1
+    
+class OCT3DCNNForClassification(nn.Module):
+    def __init__(self, pretrained_path="/local2/acc/Glaucoma/SimCLR/simclr_pretrained_weights.pth", num_classes=1, in_channels=1, dropout_rate=0.2):
+        super(OCT3DCNNForClassification, self).__init__()
+        self.encoder = OCT3DCNNEncoder(num_classes=32, in_channels=in_channels, dropout_rate=dropout_rate)  # Match embedding dim
+        
+        # Replace the projector with the classification head
+        self.classification_head = nn.Sequential(
+            nn.Linear(32, 128),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(128, num_classes)
+        )
+        
+        # Load pretrained weights
+        if pretrained_path:
+            state_dict = torch.load(pretrained_path, map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+            self.encoder.load_state_dict(state_dict, strict=False)  # Load encoder weights only
+
+    def forward(self, x):
+        features = self.encoder(x)  # Get encoder output
+        logits = self.classification_head(features)
+        return logits
     
 class FocalLoss(nn.Module):
     def __init__(self, alpha=0.25, gamma=2, reduction='mean'):
@@ -237,12 +293,16 @@ def model_factory(
     num_l=12,
     num_h=12,
     qkv=False,
-    join_method = "concat"
+    join_method = "concat",
+    contrastive_pretrain = False
 ):
     n_classes = contrastive_layer_size if contrastive_mode != "None" and model_name != "DualViT" else num_classes
     if model_name == "3DCNN":
-        # model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
-        model = OCT3DCNNEncoder(num_classes=n_classes, in_channels=1, dropout_rate=dropout)
+        if contrastive_pretrain:
+            model = OCT3DCNNForClassification(num_classes=n_classes, in_channels=1, dropout_rate=dropout)
+        else:
+            # model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
+            model = OCT3DCNNEncoder(num_classes=n_classes, in_channels=1, dropout_rate=dropout)
     elif model_name == "ViT":
         model = ViTWrapper(
             in_channels=1, 
@@ -420,7 +480,9 @@ def model_factory(
     if contrastive_mode != "None" and model_name != "DualViT":
         if use_dual_paths:
             return dual_paths(model, num_classes, dropout)
-        return ContrastiveWrapper(model, contrastive_layer_size, num_classes, dropout_rate=dropout, join_method=join_method)
+        if contrastive_mode == "Denoise":
+            return ContrastiveWrapper(model, contrastive_layer_size)
+        return SiameseeWrapper(model, contrastive_layer_size, num_classes, dropout_rate=dropout, join_method=join_method)
     else:
         return model 
     
