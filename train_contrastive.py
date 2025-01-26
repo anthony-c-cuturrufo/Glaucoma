@@ -50,6 +50,8 @@ if __name__ == "__main__":
     embedding_dim = 128
     learning_rate = 1e-3
     num_epochs = 15
+    model_name = "3DCNN"
+    temperature = .5
 
     # Data Augmentation Transforms
     train_transform = Compose([
@@ -85,14 +87,14 @@ if __name__ == "__main__":
 
     # Model and Loss
     model = model_factory(
-        model_name="3DCNN",
+        model_name=model_name,
         image_size=image_size,
         dropout=dropout_rate,
         contrastive_mode=contrastive_mode,
         contrastive_layer_size=embedding_dim,
         pretrained=False
     )
-    criterion = SimCLRLoss(temperature=0.5)
+    criterion = SimCLRLoss(temperature=temperature)
 
     # Optimizer and Scheduler
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -103,5 +105,6 @@ if __name__ == "__main__":
 
     # Save Pretrained Weights
     os.makedirs("checkpoints", exist_ok=True)
-    torch.save(model.state_dict(), "/local2/acc/Glaucoma/SimCLR/simclr_pretrained_weights.pth")
-    print("Pretraining complete. Weights saved to '/local2/acc/Glaucoma/SimCLR/simclr_pretrained_weights.pth'.")
+    fpath = f"/local2/acc/Glaucoma/SimCLR/simclr_{model_name}_b{batch_size}_e{num_epochs}_ed{embedding_dim}_lr{learning_rate}_d{dropout_rate}_t{temperature}.pth"
+    torch.save(model.state_dict(),fpath)
+    print("Pretraining complete")

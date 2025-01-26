@@ -226,7 +226,7 @@ class ContrastiveWrapper(nn.Module):
         return embedding_1
     
 class OCT3DCNNForClassification(nn.Module):
-    def __init__(self, pretrained_path="/local2/acc/Glaucoma/SimCLR/simclr_pretrained_weights.pth", num_classes=1, in_channels=1, dropout_rate=0.2):
+    def __init__(self, pretrained_path, num_classes=1, in_channels=1, dropout_rate=0.2):
         super(OCT3DCNNForClassification, self).__init__()
         self.encoder = OCT3DCNNEncoder(num_classes=32, in_channels=in_channels, dropout_rate=dropout_rate)  # Match embedding dim
         
@@ -294,12 +294,12 @@ def model_factory(
     num_h=12,
     qkv=False,
     join_method = "concat",
-    contrastive_pretrain = False
+    contrastive_path = None
 ):
     n_classes = contrastive_layer_size if contrastive_mode != "None" and model_name != "DualViT" else num_classes
     if model_name == "3DCNN":
-        if contrastive_pretrain:
-            model = OCT3DCNNForClassification(num_classes=n_classes, in_channels=1, dropout_rate=dropout)
+        if contrastive_path is not None:
+            model = OCT3DCNNForClassification(contrastive_path, num_classes=n_classes, in_channels=1, dropout_rate=dropout)
         else:
             # model = Efficient3DCNN(in_channels=1, num_classes=n_classes, dropout_rate=dropout, conv_layers=conv_layers, fc_layers=fc_layers)
             model = OCT3DCNNEncoder(num_classes=n_classes, in_channels=1, dropout_rate=dropout)
